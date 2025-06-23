@@ -159,10 +159,54 @@ with pages[idx["Top 10"]]:
 with pages[idx["Google Insight"]]:
     st.subheader(f"Google topic insight – {MAIN_BRAND}")
 
+    # Segment definitions
     high = df_main[df_main["total_interactions"] >= 10]
-    low = df_main[df_main["total_interactions"] < 10]
+    low  = df_main[df_main["total_interactions"] < 10]
 
     g_high = high[high["google_topic"]]
     ng_high = high[~high["google_topic"]]
     g_low = low[low["google_topic"]]
-    ng_low = low[~low[
+    ng_low = low[~low["google_topic"]]
+
+    # KPI cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("High ≥10 • Google", len(g_high))
+    c2.metric("High ≥10 • non‑Google", len(ng_high))
+    c3.metric("Low <10 • Google", len(g_low))
+    c4.metric("Total Google posts", int(df_main["google_topic"].sum()))
+
+    # High performers without Google topic
+    st.markdown("#### High performers **without** Google topic")
+    if ng_high.empty:
+        st.info("No high‑performer without Google topic.")
+    else:
+        cols_show = [map_cols["content"], "date_time", "total_interactions"]
+        st.dataframe(ng_high[cols_show])
+        st.download_button(
+            "Download CSV", ng_high[cols_show].to_csv(index=False).encode(),
+            "high_non_google.csv", key="dl_ng_high"
+        )
+
+    # Summary table
+    st.markdown("#### Summary table")
+    summary = pd.DataFrame({
+        "Segment": [
+            "High Google", "High non‑Google", "Low Google", "Low non‑Google"
+        ],
+        "Posts": [len(g_high), len(ng_high), len(g_low), len(ng_low)],
+        "Avg interactions": [
+            g_high.total_interactions.mean(),
+            ng_high.total_interactions.mean() if len(ng_high) else 0,
+            g_low.total_interactions.mean(),
+            ng_low.total_interactions.mean() if len(ng_low) else 0,
+        ],
+    })
+    st.dataframe(summary.round(1))
+
+# ─────────────────────────────── Raw tab ─────────────────────────────────────────
+with pages[idx["Raw"]]:
+    st.subheader("Raw & Downloads")
+    st.dataframe(df_main, use_container_width=True)
+    st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="dl_main")
+    if not df_comp.empty:
+        st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="dl_comp")

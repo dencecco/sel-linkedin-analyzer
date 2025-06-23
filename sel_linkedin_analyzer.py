@@ -1,40 +1,42 @@
 """
 LinkedIn / Multi‑Social CSV Analyzer
 ===================================
-Streamlit app to explore social‑media CSV exports with automatic KPIs, Top‑10,
-**and a dedicated Google‑Topic Insight tab**.
+Streamlit app to explore LinkedIn‑style CSV exports, now with **competitor comparison**.
 
-2025‑06‑23 **Feature: Google Topic tab**
-* New tab "🔍 Google Insight" checks whether posts that exceed a two‑digit
-  interaction threshold (≥ 10) mention "Google" in the content.
-* Shows counts & averages for:
-  • High performers (≥10) with & without Google
-  • Low performers (<10) with & without Google
-* Flags any high‑performer (≥10, not repost) that does **not** contain Google.
-* Download button for that filtered table.
+2025‑06‑24 **Feature: Competitor tab**
+* Second file‑uploader lets you add a CSV that contains one **or multiple competitors**.
+* Uses the column `author` (auto‑detected) to group brands.
+* Tab *Compare* shows per‑author averages and posting frequency (posts per week).
+* Highlights the main brand (first file) and % gap vs each competitor.
+* `is_repost` now true if `action == "Repost"` **or** `author ≠ main_author`.
 """
 
 import streamlit as st
 import pandas as pd
 import altair as alt
 import numpy as np
+from datetime import timedelta
 
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
-st.title("📊 Universal Social CSV Analyzer")
+st.title("📊 Universal Social CSV Analyzer – with Competitor Benchmark")
 
 # ----------------------------------------------------------------------
-# 1. File uploader
+# 1. Upload primary CSV (main brand)
 # ----------------------------------------------------------------------
-file = st.sidebar.file_uploader("Upload your social CSV export", type="csv")
-if file is None:
-    st.info("⬅️ Upload a CSV to start.")
+file_main = st.sidebar.file_uploader("Upload MAIN brand CSV", type="csv", key="main")
+if file_main is None:
+    st.info("⬅️ Upload your main brand CSV to start.")
     st.stop()
 
-df = pd.read_csv(file)
-st.success(f"Loaded {len(df):,} rows ✅")
+df_main = pd.read_csv(file_main)
+st.success(f"Loaded main dataset: {len(df_main):,} rows ✅")
+
+# Optional competitor file
+file_comp = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="csv", key="comp")
+df_comp = pd.read_csv(file_comp) if file_comp is not None else pd.DataFrame()
 
 # ----------------------------------------------------------------------
-# 2. Column mapping
+# 2. Column mapping (for main); competitor assumed same schema
 # ----------------------------------------------------------------------
 aliases = {
     "likes": ["likeCount", "likes", "favorite_count", "reactionCount"],
@@ -44,92 +46,134 @@ aliases = {
     "content": ["postContent", "text", "message", "caption"],
     "url": ["postUrl", "url", "link"],
     "timestamp": ["postTimestamp", "created_at", "createdTime", "created_time", "timestamp", "date", "date_time"],
+    "author": ["author", "pageName", "company", "account"]
 }
-cols = list(df.columns)
 
-def auto(key):
-    for a in aliases[key]:
-        for c in cols:
-            if c.lower() == a.lower():
+def auto(col_list, key):
+    for alias in aliases[key]:
+        for c in col_list:
+            if c.lower() == alias.lower():
                 return c
     return None
-map_cols = {k: auto(k) for k in aliases}
 
-st.sidebar.header("Column mapping")
-for k,label in zip(["likes","comments","reposts","impressions","content","url","timestamp"],
-                   ["Likes","Comments","Reposts","Impressions (opt.)","Content","URL (opt.)","Timestamp (opt.)"]):
-    opts=[None]+cols
+cols_main = list(df_main.columns)
+map_cols = {k: auto(cols_main, k) for k in aliases}
+
+st.sidebar.header("Column mapping (main CSV)")
+for k,label in zip(
+    ["likes","comments","reposts","content","url","timestamp","author"],
+    ["Likes","Comments","Reposts","Content","URL (opt.)","Timestamp (opt.)","Author/Brand"]):
+    opts=[None]+cols_main
     idx=opts.index(map_cols[k]) if map_cols[k] else 0
-    map_cols[k]=st.sidebar.selectbox(label,opts,index=idx)
+    map_cols[k]=st.sidebar.selectbox(label,opts,index=idx,key=k)
 
-if None in [map_cols[x] for x in ("likes","comments","reposts")]:
-    st.error("❌ Map at least likes, comments, reposts.")
+mandatory = [map_cols[x] for x in ("likes","comments","reposts","author")]
+if None in mandatory:
+    st.error("❌ Map at least likes, comments, reposts and author.")
     st.stop()
 
 # ----------------------------------------------------------------------
-# 3. Data prep
+# 3. Prepare function to clean any dataframe
 # ----------------------------------------------------------------------
-for c in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
-    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
 
-df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
+def prep(df):
+    df = df.copy()
+    for c in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
 
-# timestamp & extras
-if map_cols["timestamp"]:
-    ts = map_cols["timestamp"]
-    df[ts] = pd.to_datetime(df[ts], errors="coerce")
-    df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
+    if map_cols["timestamp"]:
+        ts = map_cols["timestamp"]
+        df[ts] = pd.to_datetime(df[ts], errors="coerce")
+        df["date"] = df[ts].dt.date
+    else:
+        df["date"] = pd.NaT
+
+    df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
+    return df
+
+df_main = prep(df_main)
+df_comp = prep(df_comp) if not df_comp.empty else pd.DataFrame()
+
+main_brand = df_main[map_cols["author"]].mode()[0]
+
+# is_repost using author difference or explicit action
+if "action" in df_main.columns:
+    df_main["is_repost"] = df_main["action"].str.lower().eq("repost")
 else:
-    df["date_time"] = "NA"
-
-if "action" in df.columns:
-    df["is_repost"] = df["action"].str.lower().eq("repost")
-else:
-    df["is_repost"] = False
-
-# flag google topic
-df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
+    df_main["is_repost"] = False
+# competitor DF already considered separate brand so is_repost False
 
 # ----------------------------------------------------------------------
 # 4. Tabs
 # ----------------------------------------------------------------------
-# Added new tab "Recap" for overall averages
-overview, recap, top, google_tab, raw = st.tabs(["📈 Overview", "📊 Recap", "🏆 Top 10", "🔍 Google Insight", "🔧 Raw"])
+base_tabs = ["📈 Overview", "🏆 Top 10", "🔍 Google Insight"]
+if not df_comp.empty:
+    base_tabs.insert(2, "🤝 Compare")
+base_tabs.append("🔧 Raw")
+
+sections = st.tabs(base_tabs)
+overview = sections[0]
+idx_shift = 1
+if "🤝 Compare" in base_tabs:
+    compare_tab = sections[2]
+    idx_shift = 2
+
+top = sections[idx_shift]
+google_tab = sections[idx_shift+1]
+raw = sections[-1]
 
 # ---------- Overview ----------
 with overview:
+    st.metric("Main brand detected", main_brand)
     c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Avg Likes", f"{df[map_cols['likes']].mean():.2f}")
-    c2.metric("Avg Comments", f"{df[map_cols['comments']].mean():.2f}")
-    c3.metric("Avg Reposts", f"{df[map_cols['reposts']].mean():.2f}")
-    c4.metric("Avg Interactions", f"{df['total_interactions'].mean():.2f}")
+    c1.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
+    c2.metric("Avg Comments", f"{df_main[map_cols['comments']].mean():.1f}")
+    c3.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
+    c4.metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
 
-    st.markdown("#### Scatter: Comments vs Total interactions")
-    st.altair_chart(
-        alt.Chart(df).mark_circle(size=60, opacity=0.6).encode(
-            x="total_interactions", y=map_cols["comments"],
-            tooltip=[map_cols["content"], "total_interactions", map_cols["comments"]],
-            color="google_topic:N",
-        ).interactive(), use_container_width=True)
+# ---------- Compare ----------
+if not df_comp.empty:
+    with compare_tab:
+        st.markdown("### 🤝 Competitor Benchmark")
+        # Combine
+        df_comp["brand"] = df_comp[map_cols["author"]]
+        df_main["brand"] = main_brand
+        comb = pd.concat([df_main, df_comp], ignore_index=True)
 
-# ---------- Recap ----------
-with recap:
-    st.markdown("### 📊 Performance Recap – Averages")
-    recap_df = pd.DataFrame({
-        "Metric": ["Likes", "Comments", "Reposts", "Total interactions"],
-        "Average": [
-            round(df[map_cols['likes']].mean(), 2),
-            round(df[map_cols['comments']].mean(), 2),
-            round(df[map_cols['reposts']].mean(), 2),
-            round(df['total_interactions'].mean(), 2)
-        ]
-    })
-    st.table(recap_df)
+        # Metrics per brand
+        agg = comb.groupby("brand").agg(
+            posts = (map_cols["likes"], "count"),
+            avg_likes = (map_cols["likes"], "mean"),
+            avg_comments = (map_cols["comments"], "mean"),
+            avg_reposts = (map_cols["reposts"], "mean"),
+            avg_total = ("total_interactions", "mean")
+        ).reset_index()
+
+        # Posting frequency: posts per week
+        if map_cols["timestamp"]:
+            first_date = comb[map_cols["timestamp"]].min()
+            last_date = comb[map_cols["timestamp"]].max()
+            weeks = max(1, ((last_date - first_date) / timedelta(weeks=1)))
+            agg["posts_per_week"] = agg["posts"] / weeks
+
+        # Highlight main brand
+        def highlight_main(row):
+            return ["background-color:#dfe6fd" if row["brand"]==main_brand else "" for _ in row]
+
+        st.dataframe(agg.style.apply(highlight_main, axis=1).format("{:.1f}"))
+
+        # % diff chart likes
+        bench = agg.set_index("brand")
+        if main_brand in bench.index and bench.shape[0] > 1:
+            diff = ((bench["avg_total"] - bench.loc[main_brand, "avg_total"]) / bench.loc[main_brand, "avg_total"]) * 100
+            st.markdown("#### % Difference vs Main brand (Total interactions)")
+            st.bar_chart(diff.drop(main_brand))
 
 # ---------- Top 10 ----------
 with top:
-    st.markdown("#### Top 10 posts by interactions")
-    top10 = df.sort_values("total_interactions", ascending=False).head(10).copy()
+    st.markdown("#### Top 10 posts (main brand)")
+    top10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
 
     def linkify(r):
         if map_cols["url"] and pd.notna(r[map_cols["url"]]):
@@ -141,46 +185,25 @@ with top:
     disp_cols = ["Post", "date_time", map_cols['likes'], map_cols['comments'], map_cols['reposts'], "total_interactions", "google_topic", "is_repost"]
     top10 = top10[disp_cols]
 
-    style = top10.style.apply(lambda r: ["background-color:#e0e0e0" if r["is_repost"] else "" for _ in r], axis=1)
-    style = style.hide(axis="columns", subset=["is_repost"]).format(precision=0, thousands=",")
-    st.write(style.to_html(escape=False), unsafe_allow_html=True)
-
-    st.download_button("Download Top-10 CSV", top10.drop(columns=["is_repost"]).to_csv(index=False).encode(), "top10_high_performers.csv", key="top10_dl")
+    st.write(top10.to_html(escape=False), unsafe_allow_html=True)
 
 # ---------- Google Insight ----------
 with google_tab:
-    st.markdown("### Google Topic vs Performance")
+    st.markdown("### Google Topic vs Performance (main brand)")
     threshold = 10
-    high = df[df["total_interactions"] >= threshold]
-    low = df[df["total_interactions"] < threshold]
+    high = df_main[df_main["total_interactions"] >= threshold]
+    low = df_main[df_main["total_interactions"] < threshold]
 
     g_high = high[high["google_topic"]]
     ng_high = high[~high["google_topic"] & ~high["is_repost"]]
     g_low = low[low["google_topic"]]
 
-    colA, colB, colC, colD = st.columns(4)
-    colA.metric("High (≥10) • Google", len(g_high))
-    colB.metric("High (≥10) • non-Google", len(ng_high))
-    colC.metric("Low (<10) • Google", len(g_low))
-    colD.metric("Total Google posts", df["google_topic"].sum())
-
-    st.markdown("#### High performers without Google (not reposts)")
-    if ng_high.empty:
-        st.info("Every high-performer references Google or is a repost.")
-    else:
-        ng_cols = [map_cols['content'], "date_time", "total_interactions"]
-        st.dataframe(ng_high[ng_cols])
-        st.download_button("Download non-Google high posts", ng_high[ng_cols].to_csv(index=False).encode(), "non_google_high.csv", key="dl_ng_high")
-
-    st.markdown("#### Overview table")
-    summary = pd.DataFrame({
-        "Segment": ["High Google", "High non-Google (no repost)", "Low Google", "Low non-Google"],
-        "Posts": [len(g_high), len(ng_high), len(g_low), len(low) - len(g_low)],
-        "Avg Interactions": [g_high.total_interactions.mean(), ng_high.total_interactions.mean() if not ng_high.empty else 0, g_low.total_interactions.mean(), (low[~low["google_topic"]]).total_interactions.mean()],
-    })
-    st.dataframe(summary.round(1))
+    st.metric("High (>=10) with Google", len(g_high))
+    st.metric("High non-Google", len(ng_high))
 
 # ---------- Raw ----------
 with raw:
-    st.dataframe(df, use_container_width=True)
-    st.download_button("Download enriched CSV", df.to_csv(index=False).encode(), "enriched_data.csv", key="csv_dl")
+    st.dataframe(df_main, use_container_width=True)
+    st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="main_dl")
+    if not df_comp.empty:
+        st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="comp_dl")

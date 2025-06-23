@@ -18,68 +18,25 @@ if main_file is None:
     st.stop()
 comp_file = st.sidebar.file_uploader("Upload COMPETITOR CSV (opt.)", type="csv", key="comp")
 
-df_main = pd.read_csv(main_file)
-df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
+# robust CSV reader (handles comma / semicolon / tab)
+import pandas.errors as pde
 
-# ── Column mapping ─────────────────────────────────────────────────
-ALIASES = {
-    "likes":   ["like_count", "likes", "favorite_count", "likecount" ],
-    "replies": ["reply_count", "comments", "commentcount"],
-    "reposts": ["retweet_count", "repost_count", "shares"],
-    "views":   ["view_count", "view count", "viewcount", "impressions", "impression_count"],
-    "content": ["text", "tweet", "message"],
-    "url":     ["url", "tweet_url"],
-    "timestamp": ["created_at", "date", "timestamp"],
-    "author":  ["author", "username", "account", "page", "handle" ],
-}
+def safe_read(file):
+    try:
+        return pd.read_csv(file, low_memory=False)
+    except pde.ParserError:
+        file.seek(0)
+        try:
+            return pd.read_csv(file, sep=";", low_memory=False)
+        except pde.ParserError:
+            file.seek(0)
+            return pd.read_csv(file, sep=None, engine="python", on_bad_lines="skip")
 
-def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", s.lower())
+df_main = safe_read(main_file)
+df_comp = safe_read(comp_file) if comp_file else pd.DataFrame()
 
-def auto(cols, key):
-    norm_cols = [_norm(c) for c in cols]
-    for alias in ALIASES[key]:
-        na = _norm(alias)
-        for i, nc in enumerate(norm_cols):
-            if na == nc or na in nc or nc in na:
-                return cols[i]
-    return None
-
-cols_main = df_main.columns.tolist()
-map_cols = {k: auto(cols_main, k) for k in ALIASES}
-
-st.sidebar.header("Column mapping")
-for k, lbl in zip(
-    ["likes", "replies", "reposts", "views", "content", "url", "timestamp", "author"],
-    ["Likes", "Replies", "Reposts", "Views (opt.)", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
-    opts = [None] + cols_main
-    map_cols[k] = st.sidebar.selectbox(lbl, opts, index=opts.index(map_cols[k]) if map_cols[k] else 0, key=k)
-
-for must in ("likes", "replies", "reposts", "author"):
-    if map_cols[must] is None:
-        st.error("Please map at least likes, replies, reposts, author.")
-        st.stop()
-
-# ── Enrich helper ──────────────────────────────────────────────────
-
-def enrich(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    for col_key in ("likes", "replies", "reposts", "views"):
-        if map_cols[col_key] and map_cols[col_key] in df.columns:
-            df[map_cols[col_key]] = pd.to_numeric(df[map_cols[col_key]], errors="coerce").fillna(0).astype(int)
-    df["total_interactions"] = df[[map_cols["likes"], map_cols["replies"], map_cols["reposts"]]].sum(axis=1)
-    if map_cols["views"]:
-        df["eng_rate_%"] = (df["total_interactions"] / df[map_cols["views"]]).replace([float("inf"), -float("inf")], 0) * 100
-    if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
-        ts = map_cols["timestamp"]
-        df[ts] = pd.to_datetime(df[ts], errors="coerce")
-        df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
-    else:
-        df["date_time"] = "NA"
-    return df
-
-df_main = enrich(df_main)
-df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
+# enrich
+(df_comp) if not df_comp.empty else pd.DataFrame()
 
 MAIN = df_main[map_cols["author"]].mode()[0]
 df_main["brand"] = MAIN
@@ -133,3 +90,4 @@ with pages[idx["Raw"]]:
         st.download_button("Download competitor CSV", df_comp.to_csv(index=False).encode(), "competitor_x.csv")
 
 # End
+

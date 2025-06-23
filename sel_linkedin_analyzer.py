@@ -5,10 +5,9 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to inspect **any** social‑media CSV (LinkedIn, X, Facebook, IG …)
 with KPIs, Top‑10 posts (link + date‑time), weekday/month views and comment‑interaction correlation.
 
-### 2025‑06‑23 Update
-* **Better timestamp detection** (supports `createdTime`, `created_time`, `date_time`).
-* **Date‑Time column** shows formatted string (`YYYY‑MM‑DD HH:MM`).
-* **Correlation panel**: shows Pearson *r* between *comments* and *total interactions*.
+### 2025‑06‑23 Update 2
+* **Fix**: removed multiline f‑string causing `SyntaxError` on deploy.
+* **Improved**: handles empty correlation gracefully (shows “N/A”).
 """
 
 import streamlit as st
@@ -28,7 +27,13 @@ if file is None:
     st.info("⬅️ Upload a CSV to start.")
     st.stop()
 
-df = pd.read_csv(file)
+# Read CSV
+try:
+    df = pd.read_csv(file)
+except Exception as e:
+    st.error(f"Failed to read CSV: {e}")
+    st.stop()
+
 st.success(f"Loaded {len(df):,} rows ✅")
 
 # ----------------------------------------------------------------------
@@ -36,7 +41,6 @@ st.success(f"Loaded {len(df):,} rows ✅")
 # ----------------------------------------------------------------------
 
 def suggest(col_names, aliases):
-    """Return first column name matching any alias (case‑insensitive)."""
     for alias in aliases:
         for c in col_names:
             if alias.lower() == c.lower():
@@ -107,10 +111,15 @@ with t_overview:
     c3.metric("Avg Reposts", f"{df[repost_col].mean():.2f}")
     c4.metric("Avg Interactions", f"{df['total_interactions'].mean():.2f}")
 
-    # Scatter + Pearson r
-    pearson_r = np.corrcoef(df["total_interactions"], df[comment_col])[0,1]
-    st.markdown(f"#### Comments vs Total interactions  
-    Pearson **r = {pearson_r:.2f}**")
+    # Comments correlation
+    try:
+        pearson_r = np.corrcoef(df["total_interactions"], df[comment_col])[0,1]
+        corr_text = f"Pearson r = {pearson_r:.2f}"
+    except Exception:
+        corr_text = "Pearson r = N/A"
+
+    st.markdown(f"#### Comments vs Total interactions – {corr_text}")
+
     scatter = alt.Chart(df).mark_circle(size=60, opacity=0.6).encode(
         x="total_interactions",
         y=comment_col,
@@ -133,7 +142,6 @@ with t_top:
         like_col, comment_col, repost_col, "total_interactions"
     ]
     display_cols = [c for c in display_cols if c]
-
     st.dataframe(top10[display_cols], use_container_width=True)
 
 # ---------- Weekday ----------
@@ -157,4 +165,3 @@ with t_month:
 with t_raw:
     st.dataframe(df, use_container_width=True)
     st.download_button("Download enriched CSV", df.to_csv(index=False).encode(), "enriched_data.csv")
-

@@ -41,7 +41,7 @@ ALIASES = {
     "reposts": ["retweet_count", "repost_count", "shares"],
     "views":   ["view_count", "view count", "viewcount", "impressions", "impression_count"],
     "content": ["text", "tweet", "message"],
-    "url":     ["url", "tweet_url"],
+    "url":     ["url", "tweet_url", "tweetlink" ],,
     "timestamp": ["created_at", "date", "timestamp"],
     "author":  ["author", "username", "account", "page", "handle"],
 }
@@ -159,8 +159,11 @@ if "Compare" in TABS:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
         combo = pd.concat([df_main, df_comp])
-        agg = combo.groupby("brand").agg(tweets=(map_cols["likes"], "count"), avg_interactions=("total_interactions", "mean")).reset_index()
-        st.dataframe(agg)
+        agg = combo.groupby("brand").agg(
+            tweets=("total_interactions", "size"),
+            avg_interactions=("total_interactions", "mean")
+        ).reset_index()
+        st.dataframe(agg, use_container_width=True)(agg)
 
 # Raw
 with pages[idx["Raw"]]:

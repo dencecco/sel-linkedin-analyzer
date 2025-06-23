@@ -3,9 +3,8 @@ LinkedIn / Multi‑Social CSV Analyzer
 ===================================
 Streamlit app to explore social‑media CSV exports with automatic KPIs and Top‑10.
 
-2025‑06‑23 **Hotfix**
-* Removed duplicate `download_button` causing *StreamlitDuplicateElementId*.
-* Single dataframe + CSV download in **Raw** tab (`key='csv_dl'`).
+2025‑06‑23 **Hotfix 2**
+* Removed duplicated `st.download_button` (DuplicateElementKey error).
 """
 
 import streamlit as st
@@ -28,7 +27,7 @@ df = pd.read_csv(file)
 st.success(f"Loaded {len(df):,} rows ✅")
 
 # ----------------------------------------------------------------------
-# 2. Column mapping (auto + sidebar override)
+# 2. Column mapping
 # ----------------------------------------------------------------------
 aliases = {
     "likes": ["likeCount", "likes", "favorite_count", "reactionCount"],
@@ -39,126 +38,90 @@ aliases = {
     "url": ["postUrl", "url", "link"],
     "timestamp": ["postTimestamp", "created_at", "createdTime", "created_time", "timestamp", "date", "date_time"],
 }
-
 cols = list(df.columns)
 
-def auto_match(key):
-    for alias in aliases[key]:
+def auto(key):
+    for a in aliases[key]:
         for c in cols:
-            if c.lower() == alias.lower():
+            if c.lower() == a.lower():
                 return c
     return None
-
-map_cols = {k: auto_match(k) for k in aliases}
+map_cols = {k: auto(k) for k in aliases}
 
 st.sidebar.header("Column mapping")
-for key, label in zip(
-    ["likes", "comments", "reposts", "impressions", "content", "url", "timestamp"],
-    ["Likes", "Comments", "Reposts", "Impressions (opt.)", "Content", "URL (opt.)", "Timestamp (opt.)"],
-):
-    opts = [None] + cols
-    default = opts.index(map_cols[key]) if map_cols[key] else 0
-    map_cols[key] = st.sidebar.selectbox(label, opts, index=default)
+for k,label in zip(["likes","comments","reposts","impressions","content","url","timestamp"],
+                   ["Likes","Comments","Reposts","Impressions (opt.)","Content","URL (opt.)","Timestamp (opt.)"]):
+    opts=[None]+cols
+    d=opts.index(map_cols[k]) if map_cols[k] else 0
+    map_cols[k]=st.sidebar.selectbox(label,opts,index=d)
 
-if None in [map_cols[k] for k in ("likes", "comments", "reposts")]:
-    st.error("❌ Map at least likes, comments, and repost columns.")
+if None in [map_cols[x] for x in ("likes","comments","reposts")]:
+    st.error("❌ Map at least likes, comments, reposts.")
     st.stop()
 
 # ----------------------------------------------------------------------
-# 3. Data preparation
+# 3. Data prep
 # ----------------------------------------------------------------------
-for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
-    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+for c in (map_cols["likes"],map_cols["comments"],map_cols["reposts"]):
+    df[c]=pd.to_numeric(df[c],errors='coerce').fillna(0).astype(int)
 
-df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
+df["total_interactions"]=df[[map_cols["likes"],map_cols["comments"],map_cols["reposts"]]].sum(axis=1)
 
 if map_cols["timestamp"]:
-    ts = map_cols["timestamp"]
-    df[ts] = pd.to_datetime(df[ts], errors="coerce")
-    df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
+    ts=map_cols["timestamp"]
+    df[ts]=pd.to_datetime(df[ts],errors='coerce')
+    df["date_time"]=df[ts].dt.strftime("%Y-%m-%d %H:%M")
 else:
-    df["date_time"] = "NA"
+    df["date_time"]="NA"
 
-# Flag true reposts (not shares received)
 if "action" in df.columns:
-    # Rely solely on the metadata from the platform: "Repost" vs "Post"
-    df["is_repost"] = df["action"].str.lower().eq("repost")
+    df["is_repost"]=df["action"].str.lower().eq("repost")
 else:
-    df["is_repost"] = False
+    df["is_repost"]=False
 
 # ----------------------------------------------------------------------
 # 4. Tabs
 # ----------------------------------------------------------------------
-
-overview, top, raw = st.tabs(["📈 Overview", "🏆 Top 10", "🔧 Raw"])
+overview, top, raw = st.tabs(["📈 Overview","🏆 Top 10","🔧 Raw"])
 
 with overview:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Avg Likes", f"{df[map_cols['likes']].mean():.2f}")
-    c2.metric("Avg Comments", f"{df[map_cols['comments']].mean():.2f}")
-    c3.metric("Avg Reposts", f"{df[map_cols['reposts']].mean():.2f}")
-    c4.metric("Avg Interactions", f"{df['total_interactions'].mean():.2f}")
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Avg Likes",f"{df[map_cols['likes']].mean():.2f}")
+    c2.metric("Avg Comments",f"{df[map_cols['comments']].mean():.2f}")
+    c3.metric("Avg Reposts",f"{df[map_cols['reposts']].mean():.2f}")
+    c4.metric("Avg Interactions",f"{df['total_interactions'].mean():.2f}")
 
     st.markdown("#### Scatter: Comments vs Total interactions")
     st.altair_chart(
-        alt.Chart(df).mark_circle(size=60, opacity=0.6).encode(
+        alt.Chart(df).mark_circle(size=60,opacity=0.6).encode(
             x="total_interactions",
             y=map_cols["comments"],
-            tooltip=[map_cols["content"], "total_interactions", map_cols["comments"]],
-        ).interactive(),
-        use_container_width=True,
-    )
+            tooltip=[map_cols["content"],"total_interactions",map_cols["comments"]]
+        ).interactive(),use_container_width=True)
 
 with top:
     st.markdown("#### Top 10 posts by interactions")
-    top10 = df.sort_values("total_interactions", ascending=False).head(10).copy()
+    top10=df.sort_values("total_interactions",ascending=False).head(10).copy()
 
-    # Hyper‑link post content
-    def hyperlink(row):
-        if map_cols["url"] and pd.notna(row[map_cols["url"]]):
-            txt = str(row[map_cols["content"]])[:80]
-            return f"<a href='{row[map_cols['url']]}' target='_blank'>{txt}</a>"
-        return str(row[map_cols["content"]])[:80]
+    def linkify(r):
+        if map_cols["url"] and pd.notna(r[map_cols["url"]]):
+            t=str(r[map_cols["content"]])[:80]
+            return f"<a href='{r[map_cols['url']]}' target='_blank'>{t}</a>"
+        return str(r[map_cols["content"]])[:80]
+    top10["Post"]=top10.apply(linkify,axis=1)
 
-    top10["Post"] = top10.apply(hyperlink, axis=1)
+    show=["Post","date_time",map_cols['likes'],map_cols['comments'],map_cols['reposts'],"total_interactions","is_repost"]
+    top10=top10[show]
 
-    disp_cols = [
-        "Post", "date_time", map_cols["likes"], map_cols["comments"],
-        map_cols["reposts"], "total_interactions", "is_repost"
-    ]
-    top10 = top10[disp_cols]
+    style=(top10.style.apply(lambda r:["background-color:#e0e0e0" if r["is_repost"] else "" for _ in r],axis=1)
+            .hide(axis="columns",subset=["is_repost"]).format(precision=0,thousands=",")
+            .set_properties(**{"text-align":"left"})
+            .set_table_styles([{"selector":"th","props":"text-align:left;"}]))
+    st.write(style.to_html(escape=False),unsafe_allow_html=True)
 
-    # Grey background for repost
-    style = (
-        top10.style.apply(lambda r: ["background-color:#e0e0e0" if r["is_repost"] else "" for _ in r], axis=1)
-        .hide(axis="columns", subset=["is_repost"])
-        .format(precision=0, thousands=",")
-        .set_properties(**{"text-align": "left"})
-        .set_table_styles([{"selector": "th", "props": "text-align:left;"}])
-    )
-    st.write(style.to_html(escape=False), unsafe_allow_html=True)
-
-    # ---------- Download Top‑10 button ----------
-    csv_top10 = top10.drop(columns=["is_repost"]).to_csv(index=False).encode()
-    st.download_button(
-        "Download Top‑10 CSV",
-        csv_top10,
-        "top10_high_performers.csv",
-        key="top10_dl",
-    )
+    csv_top10=top10.drop(columns=["is_repost"]).to_csv(index=False).encode()
+    st.download_button("Download Top-10 CSV",csv_top10,"top10_high_performers.csv",key="top10_dl")
 
 with raw:
-    st.dataframe(df, use_container_width=True)
-    st.download_button(
-        "Download enriched CSV",
-        df.to_csv(index=False).encode(),
-        "enriched_data.csv",
-        key="csv_dl",
-    )
-    st.dataframe(df, use_container_width=True)
-    st.download_button(
-        "Download enriched CSV",
-        df.to_csv(index=False).encode(),
-        "enriched_data.csv",
-        key="csv_dl",
-    )
+    st.dataframe(df,use_container_width=True)
+    st.download_button("Download enriched CSV",df.to_csv(index=False).encode(),"enriched_data.csv",key="csv_dl")

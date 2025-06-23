@@ -23,14 +23,14 @@ df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
 
 # ── Column mapping ─────────────────────────────────────────────────
 ALIASES = {
-    "likes":   ["like_count", "likes", "favorite_count"],
+    "likes":   ["like_count", "likes", "favorite_count", "likecount" ],
     "replies": ["reply_count", "comments", "commentcount"],
     "reposts": ["retweet_count", "repost_count", "shares"],
     "views":   ["view_count", "view count", "viewcount", "impressions", "impression_count"],
     "content": ["text", "tweet", "message"],
     "url":     ["url", "tweet_url"],
     "timestamp": ["created_at", "date", "timestamp"],
-    "author":  ["author", "username", "account", "page"],
+    "author":  ["author", "username", "account", "page", "handle" ],
 }
 
 def _norm(s: str) -> str:

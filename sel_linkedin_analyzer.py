@@ -158,13 +158,13 @@ if not df_comp.empty:
         df_main["brand"] = main_brand
         comb = pd.concat([df_main, df_comp], ignore_index=True)
 
-        # Metrics per brand
+                # Metrics per brand
         agg = comb.groupby("brand").agg(
-            posts = (map_cols["likes"], "count"),
-            avg_likes = (map_cols["likes"], "mean"),
-            avg_comments = (map_cols["comments"], "mean"),
-            avg_reposts = (map_cols["reposts"], "mean"),
-            avg_total = ("total_interactions", "mean")
+            posts=(map_cols["likes"], "count"),
+            avg_likes=(map_cols["likes"], "mean"),
+            avg_comments=(map_cols["comments"], "mean"),
+            avg_reposts=(map_cols["reposts"], "mean"),
+            avg_total=("total_interactions", "mean")
         ).reset_index()
 
         # Posting frequency: posts per week
@@ -176,9 +176,14 @@ if not df_comp.empty:
 
         # Highlight main brand
         def highlight_main(row):
-            return ["background-color:#dfe6fd" if row["brand"]==main_brand else "" for _ in row]
+            return ["background-color:#dfe6fd" if row["brand"] == main_brand else "" for _ in row]
 
-        st.dataframe(agg.style.apply(highlight_main, axis=1).format("{:.1f}"))
+        numeric_cols = [c for c in agg.columns if c != "brand"]
+        fmt = {c: "{:.1f}" for c in numeric_cols}
+        st.dataframe(
+            agg.style.apply(highlight_main, axis=1).format(fmt),
+            use_container_width=True,
+        )agg.style.apply(highlight_main, axis=1).format("{:.1f}"))
 
         # % diff chart likes
         bench = agg.set_index("brand")
@@ -253,3 +258,4 @@ with raw:
     st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="main_dl")
     if not df_comp.empty:
         st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="comp_dl")
+

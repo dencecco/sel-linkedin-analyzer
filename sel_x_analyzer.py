@@ -105,7 +105,11 @@ df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
 MAIN = df_main[map_cols["author"]].mode()[0]
 df_main["brand"] = MAIN
 if not df_comp.empty:
-    df_comp["brand"] = df_comp[map_cols["author"]]
+    if map_cols["author"] in df_comp.columns:
+        df_comp["brand"] = df_comp[map_cols["author"]]
+    else:
+        st.warning("Author column not found in competitor file – labeling as 'Competitor'.")
+        df_comp["brand"] = "Competitor"
 
 # ── Tabs ───────────────────────────────────────────────────────────
 TABS = ["Overview", "Top 10"]

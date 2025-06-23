@@ -24,7 +24,7 @@ df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
 # ── Column mapping ─────────────────────────────────────────────────
 ALIASES = {
     "likes":   ["like_count", "likes", "favorite_count"],
-    "replies": ["reply_count", "comments"],
+    "replies": ["reply_count", "comments", "commentcount"],
     "reposts": ["retweet_count", "repost_count", "shares"],
     "views":   ["view_count", "view count", "viewcount", "impressions", "impression_count"],
     "content": ["text", "tweet", "message"],
@@ -133,4 +133,3 @@ with pages[idx["Raw"]]:
         st.download_button("Download competitor CSV", df_comp.to_csv(index=False).encode(), "competitor_x.csv")
 
 # End
-

@@ -133,3 +133,4 @@ with pages[idx["Raw"]]:
         st.download_button("Download competitor CSV", df_comp.to_csv(index=False).encode(), "competitor_x.csv")
 
 # End
+

@@ -43,7 +43,7 @@ ALIASES = {
     "content": ["text", "tweet", "message"],
     "url":     ["url", "tweet_url", "tweetlink"],
     "timestamp": ["created_at", "date", "timestamp"],
-    "author":  ["author", "username", "account", "page", "handle"],
+    "author":  ["author", "username", "account", "page", "handle", "profileuser"],
 }
 
 def _norm(s: str) -> str:

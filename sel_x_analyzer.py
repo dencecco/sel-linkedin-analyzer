@@ -74,9 +74,13 @@ for k, label in zip(
     idx = opts.index(map_cols[k]) if map_cols[k] else 0
     map_cols[k] = st.sidebar.selectbox(label, opts, index=idx, key=k)
 
-if None in [map_cols[c] for c in ("likes", "comments", "reposts", "views", "author")]:
-    st.error("Please map at least likes, replies, reposts, views and author.")
+# mandatory columns now exclude "views" (optional)
+if None in [map_cols[c] for c in ("likes", "comments", "reposts", "author")]:
+    st.error("Please map at least likes, replies, reposts and author columns.")
     st.stop()
+
+if map_cols["views"] is None:
+    st.warning("Views column not mapped – engagement rate will be skipped.")
 
 # ───────────────────────── Enrich helper ─────────────────────────
 

@@ -113,31 +113,48 @@ with top:
     st.markdown("#### Top 10 posts by interactions")
     top10 = df.sort_values("total_interactions", ascending=False).head(10).copy()
 
+    # Hyper‑link post content
     def hyperlink(row):
         if map_cols["url"] and pd.notna(row[map_cols["url"]]):
-            text = str(row[map_cols["content"]])[:80]
-            return f"<a href='{row[map_cols['url']]}' target='_blank'>{text}</a>"
+            txt = str(row[map_cols["content"]])[:80]
+            return f"<a href='{row[map_cols['url']]}' target='_blank'>{txt}</a>"
         return str(row[map_cols["content"]])[:80]
 
     top10["Post"] = top10.apply(hyperlink, axis=1)
 
-    disp_cols = ["Post", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], "total_interactions", "is_repost"]
+    disp_cols = [
+        "Post", "date_time", map_cols["likes"], map_cols["comments"],
+        map_cols["reposts"], "total_interactions", "is_repost"
+    ]
     top10 = top10[disp_cols]
 
-    def grey(row):
-        return ["background-color:#e0e0e0" if row["is_repost"] else "" for _ in row]
-
+    # Grey background for repost
     style = (
-        top10.style.apply(grey, axis=1)
+        top10.style.apply(lambda r: ["background-color:#e0e0e0" if r["is_repost"] else "" for _ in r], axis=1)
         .hide(axis="columns", subset=["is_repost"])
         .format(precision=0, thousands=",")
         .set_properties(**{"text-align": "left"})
         .set_table_styles([{"selector": "th", "props": "text-align:left;"}])
     )
-
     st.write(style.to_html(escape=False), unsafe_allow_html=True)
 
+    # ---------- Download Top‑10 button ----------
+    csv_top10 = top10.drop(columns=["is_repost"]).to_csv(index=False).encode()
+    st.download_button(
+        "Download Top‑10 CSV",
+        csv_top10,
+        "top10_high_performers.csv",
+        key="top10_dl",
+    )
+
 with raw:
+    st.dataframe(df, use_container_width=True)
+    st.download_button(
+        "Download enriched CSV",
+        df.to_csv(index=False).encode(),
+        "enriched_data.csv",
+        key="csv_dl",
+    )
     st.dataframe(df, use_container_width=True)
     st.download_button(
         "Download enriched CSV",

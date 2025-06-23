@@ -183,7 +183,7 @@ if not df_comp.empty:
         st.dataframe(
             agg.style.apply(highlight_main, axis=1).format(fmt),
             use_container_width=True,
-        )agg.style.apply(highlight_main, axis=1).format("{:.1f}"))
+        ).style.apply(highlight_main, axis=1).format("{:.1f}"))
 
         # % diff chart likes
         bench = agg.set_index("brand")
@@ -258,4 +258,3 @@ with raw:
     st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="main_dl")
     if not df_comp.empty:
         st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="comp_dl")
-

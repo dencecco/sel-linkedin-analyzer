@@ -159,11 +159,27 @@ if "Compare" in TABS:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
         combo = pd.concat([df_main, df_comp])
-        agg = combo.groupby("brand").agg(
-            tweets=("total_interactions", "size"),
-            avg_interactions=("total_interactions", "mean")
-        ).reset_index()
-        st.dataframe(agg, use_container_width=True)
+
+        agg_dict = {
+            "tweets": ("total_interactions", "size"),
+            "avg_interactions": ("total_interactions", "mean"),
+            "avg_likes": (map_cols["likes"], "mean"),
+            "avg_replies": (map_cols["replies"], "mean"),
+            "avg_reposts": (map_cols["reposts"], "mean"),
+        }
+        if map_cols["views"] and map_cols["views"] in combo.columns:
+            agg_dict["avg_views"] = (map_cols["views"], "mean")
+            agg_dict["avg_eng_%"] = ("eng_rate_%", "mean")
+
+        agg = combo.groupby("brand").agg(**agg_dict).reset_index()
+        agg = agg.fillna(0)
+
+        # highlight main brand
+        def hl(row):
+            return ["background-color:#dfe6fd" if row["brand"] == MAIN else "" for _ in row]
+
+        fmt_cols = {c: "{:.1f}" for c in agg.columns if c != "brand" and c != "tweets"}
+        st.dataframe(agg.style.apply(hl, axis=1).format(fmt_cols), use_container_width=True)
 
 # Raw
 with pages[idx["Raw"]]:

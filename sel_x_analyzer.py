@@ -6,14 +6,14 @@ optionally a competitor file, mirroring the LinkedIn tool structure.
 Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
 
 Columns auto‑detected (case‑insensitive):
-    • likes           → like_count, likes, favorite_count
-    • replies         → reply_count, comments
-    • reposts         → repost_count, retweet_count, shares
-    • views           → view_count, impressions
-    • content         → text, tweet, message
-    • url             → url, tweet_url
-    • timestamp       → created_at, date
-    • author          → author, username, account
+    • likes    → like_count, likes, favorite_count
+    • replies  → reply_count, comments
+    • reposts  → repost_count, retweet_count, shares
+    • views    → view_count, view count, viewcount, impression_count, impressions
+    • content  → text, tweet, message
+    • url      → url, tweet_url
+    • timestamp→ created_at, date, timestamp
+    • author   → author, username, account
 """
 
 import streamlit as st
@@ -36,14 +36,14 @@ df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
 
 # ───────────────────────── Column mapping ─────────────────────────
 ALIASES = {
-    "likes"    : ["like_count", "likes", "favorite_count"],
-    "comments" : ["reply_count", "comments"],
-    "reposts"  : ["repost_count", "retweet_count", "shares"],
-    "views"    : ["view_count", "impressions"],
-    "content"  : ["text", "tweet", "message"],
-    "url"      : ["url", "tweet_url"],
+    "likes"   : ["like_count", "likes", "favorite_count"],
+    "comments": ["reply_count", "comments"],
+    "reposts" : ["repost_count", "retweet_count", "shares"],
+    "views"   : ["view_count", "view count", "viewcount", "impression_count", "impressions"],
+    "content" : ["text", "tweet", "message"],
+    "url"     : ["url", "tweet_url"],
     "timestamp": ["created_at", "date", "timestamp"],
-    "author"   : ["author", "username", "account"],
+    "author"  : ["author", "username", "account"],
 }
 
 def auto(cols, key):
@@ -58,13 +58,13 @@ map_cols = {k: auto(cols_main, k) for k in ALIASES}
 
 st.sidebar.header("Map columns (MAIN CSV)")
 for k, label in zip(
-    ["likes","comments","reposts","views","content","url","timestamp","author"],
-    ["Likes","Replies","Reposts","Views","Content","URL (opt.)","Timestamp (opt.)","Author"]):
+    ["likes", "comments", "reposts", "views", "content", "url", "timestamp", "author"],
+    ["Likes", "Replies", "Reposts", "Views", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
     opts = [None] + cols_main
     idx = opts.index(map_cols[k]) if map_cols[k] else 0
     map_cols[k] = st.sidebar.selectbox(label, opts, index=idx, key=k)
 
-if None in [map_cols[c] for c in ("likes","comments","reposts","views","author")]:
+if None in [map_cols[c] for c in ("likes", "comments", "reposts", "views", "author")]:
     st.error("Please map at least likes, replies, reposts, views and author.")
     st.stop()
 
@@ -96,18 +96,19 @@ df_main["brand"] = MAIN_BRAND
 if not df_comp.empty:
     df_comp["brand"] = df_comp[map_cols["author"]]
 
-# ───────────────────────── Tabs ─────────────────────────
+# ───────────────────────── Tabs setup ─────────────────────────
 TABS = ["Overview", "Top 10", "Google Insight"]
-if not df_comp.empty: TABS.insert(1, "Compare")
+if not df_comp.empty:
+    TABS.insert(1, "Compare")
 TABS.append("Raw")
 
 pages = st.tabs(["🐦 " + t for t in TABS])
-idx = {n:i for i,n in enumerate(TABS)}
+idx = {n: i for i, n in enumerate(TABS)}
 
 # ───────── Overview ─────────
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
-    a,b,c,d,e = st.columns(5)
+    a, b, c, d, e = st.columns(5)
     a.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
     b.metric("Avg Replies", f"{df_main[map_cols['comments']].mean():.1f}")
     c.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
@@ -117,8 +118,9 @@ with pages[idx["Overview"]]:
     st.altair_chart(
         alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
             x="total_interactions", y=map_cols["views"], color="google_topic:N",
-            tooltip=[map_cols["content"], "total_interactions", map_cols["views"]]
-        ).interactive(), use_container_width=True)
+            tooltip=[map_cols["content"], "total_interactions", map_cols["views"]],
+        ).interactive(), use_container_width=True
+    )
 
 # ───────── Compare ─────────
 if "Compare" in TABS:
@@ -137,7 +139,7 @@ if "Compare" in TABS:
 with pages[idx["Top 10"]]:
     st.subheader("Top 10 tweets – " + MAIN_BRAND)
     top10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
-    top10["Tweet"] = top10[map_cols["content"]].astype(str).str.slice(0,80)
+    top10["Tweet"] = top10[map_cols["content"]].astype(str).str.slice(0, 80)
     st.table(top10[["Tweet", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], map_cols["views"], "eng_rate_%"]])
 
 # ───────── Google Insight ─────────
@@ -145,10 +147,10 @@ with pages[idx["Google Insight"]]:
     st.subheader("Google topic insight")
     hi = df_main[df_main["total_interactions"] >= 10]
     lo = df_main[df_main["total_interactions"] < 10]
-    st.metric("High tweets about Google", hi[hi["google_topic"]].shape[0])
-    st.metric("High tweets non‑Google", hi[~hi["google_topic"]].shape[0])
+
+    st.metric("High tweets about Google", int(hi[hi["google_topic"]].shape[0]))
+    st.metric("High tweets non‑Google", int(hi[~hi["google_topic"]].shape[0]))
 
 # ───────── Raw ─────────
 with pages[idx["Raw"]]:
-    st.dataframe(df_main, use_container_width=True)
-    st.download_button("Download enriched CSV", df_main.to_csv(index=False).encode(), "enriched_x_main.csv", key="dl_x")
+    st.dataframe(df_main, use_container

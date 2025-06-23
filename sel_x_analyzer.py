@@ -86,7 +86,7 @@ def enrich(df):
     if base_cols:
         df["total_interactions"] = df[base_cols].sum(axis=1)
     else:
-        df["total_interactions"] = 0(axis=1)
+        df["total_interactions"] = 0
     if map_cols["views"] and map_cols["views"] in df.columns:
         df["eng_rate_%"] = (df["total_interactions"] / df[map_cols["views"]]).replace([float("inf"), -float("inf")], 0) * 100
     else:

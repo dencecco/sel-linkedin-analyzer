@@ -2,9 +2,9 @@
 LinkedIn / Multi‑Social CSV Analyzer
 ===================================
 Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
-optionally a **competitor file**. Includes Overview, Compare, Top‑10, Google
-Insight, and Raw tabs.
-Last update: 2025‑06‑24 (fixed Google Insight metrics rendering).
+optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
+Insight · Raw.
+Last update: 2025‑06‑24 – fixed Google Insight block and syntax errors.
 """
 
 import streamlit as st
@@ -15,9 +15,7 @@ from datetime import timedelta
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
 st.title("📊 Universal Social CSV Analyzer – with Competitor Benchmark")
 
-# ---------------------------------------------------------------------
-# 1. Uploads
-# ---------------------------------------------------------------------
+# ───────────────────────────────────── Uploads ──────────────────────────────────────
 main_file = st.sidebar.file_uploader("Upload MAIN brand CSV", type="csv", key="main")
 if main_file is None:
     st.info("⬅️ Upload your main brand CSV to start.")
@@ -28,9 +26,7 @@ comp_file = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="c
 df_main = pd.read_csv(main_file)
 df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
 
-# ---------------------------------------------------------------------
-# 2. Column mapping
-# ---------------------------------------------------------------------
+# ─────────────────────────────────── Column mapping ──────────────────────────────────
 ALIASES = {
     "likes": ["likecount", "likes", "favorite_count", "reactioncount"],
     "comments": ["commentcount", "comments", "reply_count"],
@@ -38,42 +34,41 @@ ALIASES = {
     "content": ["postcontent", "text", "message", "caption"],
     "url": ["posturl", "url", "link"],
     "timestamp": ["posttimestamp", "created_at", "createdtime", "created_time", "timestamp", "date"],
-    "author": ["author", "pagename", "company", "account"]
+    "author": ["author", "pagename", "company", "account"],
 }
 
-def col_auto(cols, key):
-    lower = [c.lower() for c in cols]
+def auto(col_list, key):
+    lower = [c.lower() for c in col_list]
     for alias in ALIASES[key]:
         if alias in lower:
-            return cols[lower.index(alias)]
+            return col_list[lower.index(alias)]
     return None
 
 cols_main = df_main.columns.tolist()
-map_cols = {k: col_auto(cols_main, k) for k in ALIASES}
+map_cols = {k: auto(cols_main, k) for k in ALIASES}
 
 st.sidebar.header("Map columns (MAIN CSV)")
 for k, label in zip(
     ["likes", "comments", "reposts", "content", "url", "timestamp", "author"],
     ["Likes", "Comments", "Reposts", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
-    options = [None] + cols_main
-    default = options.index(map_cols[k]) if map_cols[k] else 0
-    map_cols[k] = st.sidebar.selectbox(label, options, index=default, key=k)
+    opts = [None] + cols_main
+    idx_default = opts.index(map_cols[k]) if map_cols[k] else 0
+    map_cols[k] = st.sidebar.selectbox(label, opts, index=idx_default, key=k)
 
-if None in [map_cols[x] for x in ("likes", "comments", "reposts", "author")]:
-    st.error("Please map at least likes, comments, reposts and author columns.")
+if None in [map_cols[c] for c in ("likes", "comments", "reposts", "author")]:
+    st.error("Please map at least likes, comments, reposts and author.")
     st.stop()
 
-# ---------------------------------------------------------------------
-# 3. Clean & enrich function
-# ---------------------------------------------------------------------
+# ────────────────────────────── Helper: enrich dataframe ─────────────────────────────
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    # numeric clean
     for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
 
-    # timestamp → date_time
+    # timestamp
     if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
         ts = map_cols["timestamp"]
         df[ts] = pd.to_datetime(df[ts], errors="coerce")
@@ -94,9 +89,7 @@ df_main["brand"] = MAIN_BRAND
 if not df_comp.empty:
     df_comp["brand"] = df_comp[map_cols["author"]]
 
-# ---------------------------------------------------------------------
-# 4. Tabs
-# ---------------------------------------------------------------------
+# ───────────────────────────────────── Tabs ────────────────────────────────────────
 TABS = ["Overview", "Top 10", "Google Insight"]
 if not df_comp.empty:
     TABS.insert(1, "Compare")
@@ -105,14 +98,14 @@ TABS.append("Raw")
 pages = st.tabs(["📊 " + t for t in TABS])
 idx = {name: i for i, name in enumerate(TABS)}
 
-# -------- Overview --------
+# ─────────────────────────────── Overview tab ──────────────────────────────────────
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
-    c2.metric("Avg Comments", f"{df_main[map_cols['comments']].mean():.1f}")
-    c3.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
-    c4.metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
+    a, b, c, d = st.columns(4)
+    a.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
+    b.metric("Avg Comments", f"{df_main[map_cols['comments']].mean():.1f}")
+    c.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
+    d.metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
 
     st.markdown("#### Scatter: Comments vs Total interactions (Google color)")
     st.altair_chart(
@@ -125,7 +118,7 @@ with pages[idx["Overview"]]:
         use_container_width=True,
     )
 
-# -------- Compare --------
+# ─────────────────────────────── Compare tab ──────────────────────────────────────
 if "Compare" in TABS:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
@@ -140,31 +133,29 @@ if "Compare" in TABS:
         ).reset_index()
 
         if map_cols["timestamp"] and map_cols["timestamp"] in combined.columns:
-            span_days = (combined[map_cols["timestamp"]].max() - combined[map_cols["timestamp"]].min()).days
-            weeks = max(1, span_days / 7)
-            agg["posts_per_week"] = agg["posts"] / weeks
+            span = (combined[map_cols["timestamp"]].max() - combined[map_cols["timestamp"]].min()).days / 7
+            span = max(span, 1)
+            agg["posts_per_week"] = agg["posts"] / span
 
-        def highlight(row):
-            return ["background-color:#dfe6fd" if row["brand"] == MAIN_BRAND else "" for _ in row]
+        hl = lambda row: ["background-color:#dfe6fd" if row["brand"] == MAIN_BRAND else "" for _ in row]
+        fmts = {c: "{:.1f}" for c in agg.columns if c != "brand"}
+        st.dataframe(agg.style.apply(hl, axis=1).format(fmts), use_container_width=True)
 
-        fmt = {c: "{:.1f}" for c in agg.columns if c != "brand"}
-        st.dataframe(agg.style.apply(highlight, axis=1).format(fmt), use_container_width=True)
-
-# -------- Top 10 --------
+# ─────────────────────────────── Top‑10 tab ──────────────────────────────────────
 with pages[idx["Top 10"]]:
     st.subheader(f"Top 10 posts – {MAIN_BRAND}")
-    top10 = df_main.sort_values("total_interactions", ascending=False).head(10)
+    top10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
 
-    def mk_link(row):
-        if map_cols["url"] and pd.notna(row[map_cols["url"]]):
-            return f"<a href='{row[map_cols['url']]}' target='_blank'>{str(row[map_cols['content']])[:80]}</a>"
-        return str(row[map_cols["content"]])[:80]
+    def linkify(r):
+        if map_cols["url"] and pd.notna(r[map_cols["url"]]):
+            return f"<a href='{r[map_cols['url']]}' target='_blank'>{str(r[map_cols['content']])[:80]}</a>"
+        return str(r[map_cols["content"]])[:80]
 
-    top10["Post"] = top10.apply(mk_link, axis=1)
-    cols_show = ["Post", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], "total_interactions", "google_topic"]
-    st.write(top10[cols_show].to_html(escape=False), unsafe_allow_html=True)
+    top10["Post"] = top10.apply(linkify, axis=1)
+    show_cols = ["Post", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], "total_interactions", "google_topic"]
+    st.write(top10[show_cols].to_html(escape=False), unsafe_allow_html=True)
 
-# -------- Google Insight --------
+# ─────────────────────────────── Google Insight ───────────────────────────────────
 with pages[idx["Google Insight"]]:
     st.subheader(f"Google topic insight – {MAIN_BRAND}")
 
@@ -174,7 +165,4 @@ with pages[idx["Google Insight"]]:
     g_high = high[high["google_topic"]]
     ng_high = high[~high["google_topic"]]
     g_low = low[low["google_topic"]]
-    ng_low = low[~low["google_topic"]]
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("High ≥10 • Google", len
+    ng_low = low[~low[

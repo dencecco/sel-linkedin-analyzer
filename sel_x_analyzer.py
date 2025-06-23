@@ -81,7 +81,12 @@ def enrich(df):
         col = map_cols[key]
         if col and col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    df["total_interactions"] = df[[map_cols["likes"], map_cols["replies"], map_cols["reposts"]]].sum(axis=1)
+    # compute interactions only on columns that exist in this DF
+    base_cols = [c for c in (map_cols["likes"], map_cols["replies"], map_cols["reposts"]) if c in df.columns]
+    if base_cols:
+        df["total_interactions"] = df[base_cols].sum(axis=1)
+    else:
+        df["total_interactions"] = 0(axis=1)
     if map_cols["views"] and map_cols["views"] in df.columns:
         df["eng_rate_%"] = (df["total_interactions"] / df[map_cols["views"]]).replace([float("inf"), -float("inf")], 0) * 100
     else:
@@ -148,4 +153,3 @@ with pages[idx["Raw"]]:
         st.download_button("Download competitor CSV", df_comp.to_csv(index=False).encode(), "competitor_x.csv")
 
 # End
-

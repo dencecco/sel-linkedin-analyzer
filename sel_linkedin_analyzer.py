@@ -137,6 +137,18 @@ with overview:
     c3.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
     c4.metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
 
+    # Restore scatter plot with Google color code
+    st.markdown("#### Scatter: Comments vs Total interactions")
+    st.altair_chart(
+        alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
+            x="total_interactions",
+            y=map_cols["comments"],
+            color="google_topic:N",
+            tooltip=[map_cols["content"], "total_interactions", map_cols["comments"]]
+        ).interactive(),
+        use_container_width=True,
+    )
+
 # ---------- Compare ----------
 if not df_comp.empty:
     with compare_tab:
@@ -212,3 +224,4 @@ with raw:
     st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="main_dl")
     if not df_comp.empty:
         st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="comp_dl")
+

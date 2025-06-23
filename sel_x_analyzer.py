@@ -46,11 +46,21 @@ ALIASES = {
     "author"  : ["author", "username", "account"],
 }
 
+def _norm(s: str) -> str:
+    """Normalize header: lowercase, strip spaces, keep alnum only."""
+    import re
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
 def auto(cols, key):
-    lower = [c.lower() for c in cols]
+    norm_cols = [_norm(c) for c in cols]
     for alias in ALIASES[key]:
-        if alias in lower:
-            return cols[lower.index(alias)]
+        norm_alias = _norm(alias)
+        if norm_alias in norm_cols:
+            return cols[norm_cols.index(norm_alias)]
+        # also accept alias as substring of column
+        for i, nc in enumerate(norm_cols):
+            if norm_alias in nc or nc in norm_alias:
+                return cols[i]
     return None
 
 cols_main = df_main.columns.tolist()

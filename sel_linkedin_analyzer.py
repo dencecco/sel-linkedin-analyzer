@@ -126,25 +126,34 @@ with t_overview:
 
 with t_top:
     st.markdown("#### Top 10 posts by interactions")
-    top10= df.sort_values("total_interactions",ascending=False).head(10).copy()
+    top10 = df.sort_values("total_interactions", ascending=False).head(10).copy()
 
-    # Hyper‑linked content
+    # Hyper‑linked content (opens in new tab)
     if map_cols["url"] and map_cols["content"]:
-        top10["Post"] = top10.apply(
-            lambda row: f"[ {row[map_cols['content']][:80]} ]({row[map_cols['url']]})", axis=1
-        )
+        def make_link(row):
+            url = row[map_cols["url"]]
+            text = str(row[map_cols["content"]])[:80]
+            return f"<a href='{url}' target='_blank'>{text}</a>"
+        top10["Post"] = top10.apply(make_link, axis=1)
     else:
-        top10["Post"] = top10[map_cols["content"]].astype(str).str.slice(0,80)
+        top10["Post"] = top10[map_cols["content"]].astype(str).str.slice(0, 80)
 
-    display_cols=["Post","date_time",map_cols['likes'],map_cols['comments'],map_cols['reposts'],"total_interactions"]
+    display_cols = ["Post", "date_time", map_cols['likes'], map_cols['comments'], map_cols['reposts'], "total_interactions", "is_repost"]
+    top10 = top10[display_cols]
 
-    # Style: grey if repost
-    def highlight_repost(row):
-        return ["background-color:#e0e0e0" if row["is_repost"] else "" for _ in row]
+    # Styling: grey background for repost rows
+    def highlight(row):
+        style = ["background-color:#e0e0e0" if row["is_repost"] else "" for _ in row]
+        return style
 
-    styled= top10[display_cols+ ["is_repost"]].style.apply(highlight_repost,axis=1).hide_columns("is_repost")
-    st.dataframe(styled,use_container_width=True)
+    styler = top10.style.apply(highlight, axis=1).hide(axis="columns", subset=["is_repost"]).format(precision=0, thousands=",").set_properties(**{"text-align": "left"}).set_table_styles([
+        {"selector": "th", "props": "text-align: left;"}
+    ])
+
+    st.write(styler.to_html(escape=False), unsafe_allow_html=True)
 
 with t_raw:
+    st.dataframe(df, use_container_width=True)
+    st.download_button("Download enriched CSV", df.to_csv(index=False).encode(), "enriched_data.csv")
     st.dataframe(df,use_container_width=True)
     st.download_button("Download enriched CSV", df.to_csv(index=False).encode(),"enriched_data.csv")

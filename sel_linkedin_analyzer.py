@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
 optionally a **competitor file**. Includes Overview, Compare, Top‑10, Google
 Insight, and Raw tabs.
-Last update: 2025‑06‑24 (fixed indentation & missing blocks).
+Last update: 2025‑06‑24 (fixed Google Insight metrics rendering).
 """
 
 import streamlit as st
@@ -67,12 +67,13 @@ if None in [map_cols[x] for x in ("likes", "comments", "reposts", "author")]:
 # 3. Clean & enrich function
 # ---------------------------------------------------------------------
 
-def enrich(df):
+def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
 
+    # timestamp → date_time
     if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
         ts = map_cols["timestamp"]
         df[ts] = pd.to_datetime(df[ts], errors="coerce")
@@ -80,6 +81,7 @@ def enrich(df):
     else:
         df["date_time"] = "NA"
 
+    # topic flag
     df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
     return df
 
@@ -138,8 +140,9 @@ if "Compare" in TABS:
         ).reset_index()
 
         if map_cols["timestamp"] and map_cols["timestamp"] in combined.columns:
-            span_weeks = max(1, (combined[map_cols["timestamp"]].max() - combined[map_cols["timestamp"]].min()).days / 7)
-            agg["posts_per_week"] = agg["posts"] / span_weeks
+            span_days = (combined[map_cols["timestamp"]].max() - combined[map_cols["timestamp"]].min()).days
+            weeks = max(1, span_days / 7)
+            agg["posts_per_week"] = agg["posts"] / weeks
 
         def highlight(row):
             return ["background-color:#dfe6fd" if row["brand"] == MAIN_BRAND else "" for _ in row]
@@ -164,6 +167,7 @@ with pages[idx["Top 10"]]:
 # -------- Google Insight --------
 with pages[idx["Google Insight"]]:
     st.subheader(f"Google topic insight – {MAIN_BRAND}")
+
     high = df_main[df_main["total_interactions"] >= 10]
     low = df_main[df_main["total_interactions"] < 10]
 
@@ -173,7 +177,4 @@ with pages[idx["Google Insight"]]:
     ng_low = low[~low["google_topic"]]
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("High ≥10 • Google", len(g_high))
-    k2.metric("High ≥10 • non-Google", len(ng_high))
-    k3.metric("Low <10 • Google", len(g_low))
-    k4
+    k1.metric("High ≥10 • Google", len

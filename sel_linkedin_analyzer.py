@@ -78,17 +78,22 @@ if None in mandatory:
 
 def prep(df):
     df = df.copy()
+    # numeric cast
     for c in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
     df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
 
+    # timestamp handling
     if map_cols["timestamp"]:
         ts = map_cols["timestamp"]
         df[ts] = pd.to_datetime(df[ts], errors="coerce")
         df["date"] = df[ts].dt.date
+        df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
     else:
         df["date"] = pd.NaT
+        df["date_time"] = "NA"
 
+    # topic flag
     df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
     return df
 

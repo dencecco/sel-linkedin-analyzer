@@ -93,7 +93,8 @@ df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", 
 # ----------------------------------------------------------------------
 # 4. Tabs
 # ----------------------------------------------------------------------
-overview, top, google_tab, raw = st.tabs(["📈 Overview", "🏆 Top 10", "🔍 Google Insight", "🔧 Raw"])
+# Added new tab "Recap" for overall averages
+overview, recap, top, google_tab, raw = st.tabs(["📈 Overview", "📊 Recap", "🏆 Top 10", "🔍 Google Insight", "🔧 Raw"])
 
 # ---------- Overview ----------
 with overview:
@@ -110,6 +111,20 @@ with overview:
             tooltip=[map_cols["content"], "total_interactions", map_cols["comments"]],
             color="google_topic:N",
         ).interactive(), use_container_width=True)
+
+# ---------- Recap ----------
+with recap:
+    st.markdown("### 📊 Performance Recap – Averages")
+    recap_df = pd.DataFrame({
+        "Metric": ["Likes", "Comments", "Reposts", "Total interactions"],
+        "Average": [
+            round(df[map_cols['likes']].mean(), 2),
+            round(df[map_cols['comments']].mean(), 2),
+            round(df[map_cols['reposts']].mean(), 2),
+            round(df['total_interactions'].mean(), 2)
+        ]
+    })
+    st.table(recap_df)
 
 # ---------- Top 10 ----------
 with top:
@@ -130,7 +145,7 @@ with top:
     style = style.hide(axis="columns", subset=["is_repost"]).format(precision=0, thousands=",")
     st.write(style.to_html(escape=False), unsafe_allow_html=True)
 
-    st.download_button("Download Top‑10 CSV", top10.drop(columns=["is_repost"]).to_csv(index=False).encode(), "top10_high_performers.csv", key="top10_dl")
+    st.download_button("Download Top-10 CSV", top10.drop(columns=["is_repost"]).to_csv(index=False).encode(), "top10_high_performers.csv", key="top10_dl")
 
 # ---------- Google Insight ----------
 with google_tab:
@@ -145,21 +160,21 @@ with google_tab:
 
     colA, colB, colC, colD = st.columns(4)
     colA.metric("High (≥10) • Google", len(g_high))
-    colB.metric("High (≥10) • non‑Google", len(ng_high))
+    colB.metric("High (≥10) • non-Google", len(ng_high))
     colC.metric("Low (<10) • Google", len(g_low))
     colD.metric("Total Google posts", df["google_topic"].sum())
 
     st.markdown("#### High performers without Google (not reposts)")
     if ng_high.empty:
-        st.info("Every high‑performer references Google or is a repost.")
+        st.info("Every high-performer references Google or is a repost.")
     else:
         ng_cols = [map_cols['content'], "date_time", "total_interactions"]
         st.dataframe(ng_high[ng_cols])
-        st.download_button("Download non‑Google high posts", ng_high[ng_cols].to_csv(index=False).encode(), "non_google_high.csv", key="dl_ng_high")
+        st.download_button("Download non-Google high posts", ng_high[ng_cols].to_csv(index=False).encode(), "non_google_high.csv", key="dl_ng_high")
 
     st.markdown("#### Overview table")
     summary = pd.DataFrame({
-        "Segment": ["High Google", "High non‑Google (no repost)", "Low Google", "Low non‑Google"],
+        "Segment": ["High Google", "High non-Google (no repost)", "Low Google", "Low non-Google"],
         "Posts": [len(g_high), len(ng_high), len(g_low), len(low) - len(g_low)],
         "Avg Interactions": [g_high.total_interactions.mean(), ng_high.total_interactions.mean() if not ng_high.empty else 0, g_low.total_interactions.mean(), (low[~low["google_topic"]]).total_interactions.mean()],
     })

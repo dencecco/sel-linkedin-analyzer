@@ -77,14 +77,19 @@ for req in ("likes", "replies", "reposts", "author"):
 
 def enrich(df):
     df = df.copy()
+    # ensure numeric columns exist; if missing create 0
     for key in ("likes", "replies", "reposts", "views"):
         col = map_cols[key]
         if col and col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    # compute interactions only on columns that exist in this DF
-    base_cols = [c for c in (map_cols["likes"], map_cols["replies"], map_cols["reposts"]) if c in df.columns]
-    if base_cols:
-        df["total_interactions"] = df[base_cols].sum(axis=1)
+        else:
+            # create column of zeros if missing to keep aggregation consistent
+            df[col or f"_{key}"] = 0
+            if col is None:
+                map_cols[key] = col or f"_{key}"  # update mapping to dummy column
+
+    # compute interactions
+    df["total_interactions"] = df[[map_cols["likes"], map_cols["replies"], map_cols["reposts"]]].sum(axis=1) = df[base_cols].sum(axis=1)
     else:
         df["total_interactions"] = 0
     if map_cols["views"] and map_cols["views"] in df.columns:

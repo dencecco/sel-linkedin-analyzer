@@ -1,96 +1,92 @@
 """
-X / Multi‑Social CSV Analyzer
-============================
-Streamlit app to analyse **X (Twitter)** CSV exports for a MAIN brand and
-optionally a competitor file, mirroring the LinkedIn tool structure.
-Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
+X / Social CSV Analyzer
+======================
+Minimal, robust Streamlit app to inspect **X (Twitter)** CSV exports for one
+(main) brand plus optional competitor file.  Tabs: Overview · Top‑10 · (Compare)
+· Raw.  *Views* (impression count) are **optional** – engagement rate is shown
+only if that column exists.
 
-Columns auto‑detected (case‑insensitive):
-    • likes    → like_count, likes, favorite_count
-    • replies  → reply_count, comments
-    • reposts  → repost_count, retweet_count, shares
-    • views    → view_count, view count, viewcount, impression_count, impressions
-    • content  → text, tweet, message
-    • url      → url, tweet_url
-    • timestamp→ created_at, date, timestamp
-    • author   → author, username, account
+Auto‑detects columns by fuzzy match (case‑insensitive, ignores spaces):
+    likes → like_count, likes, favorite_count
+    replies → reply_count, comments
+    reposts → retweet_count, repost_count, shares
+    views → view_count, view count, impressions, impression_count
+    content → text, tweet, message
+    url → url, tweet_url
+    timestamp → created_at, date, timestamp
+    author → author, username, account, page
 """
 
-import streamlit as st
-import pandas as pd
-import altair as alt
+import re, streamlit as st, pandas as pd, altair as alt
 from datetime import timedelta
 
-st.set_page_config(page_title="X Social Analyzer", layout="wide")
-st.title("🐦 X (Twitter) CSV Analyzer – with Competitor Benchmark")
+st.set_page_config(page_title="🐦 X CSV Analyzer", layout="wide")
+st.title("🐦 X (Twitter) CSV Analyzer – minimal edition")
 
-# ───────────────────────── Uploads ─────────────────────────
-main_file = st.sidebar.file_uploader("Upload MAIN brand CSV", type="csv", key="main")
-if main_file is None:
-    st.info("⬅️ Upload your main brand CSV to start.")
+# ─── File upload ─────────────────────────────────────────────────────
+file_main = st.sidebar.file_uploader("Upload MAIN brand CSV", type="csv", key="main")
+if file_main is None:
+    st.info("⬅️ Upload a CSV to start")
     st.stop()
-comp_file = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="csv", key="comp")
+file_comp = st.sidebar.file_uploader("Upload COMPETITOR CSV (opt.)", type="csv", key="comp")
 
-df_main = pd.read_csv(main_file)
-df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
+df_main = pd.read_csv(file_main)
+df_comp = pd.read_csv(file_comp) if file_comp else pd.DataFrame()
 
-# ───────────────────────── Column mapping ─────────────────────────
+# ─── Column mapping ──────────────────────────────────────────────────
 ALIASES = {
-    "likes"   : ["like_count", "likes", "favorite_count"],
-    "comments": ["reply_count", "comments"],
-    "reposts" : ["repost_count", "retweet_count", "shares"],
-    "views"   : ["view_count", "view count", "viewcount", "impression_count", "impressions"],
-    "content" : ["text", "tweet", "message"],
-    "url"     : ["url", "tweet_url"],
+    "likes": ["like_count", "likes", "favorite_count"],
+    "replies": ["reply_count", "comments"],
+    "reposts": ["retweet_count", "repost_count", "shares"],
+    "views": ["view_count", "view count", "impressions", "impression_count"],
+    "content": ["text", "tweet", "message"],
+    "url": ["url", "tweet_url"],
     "timestamp": ["created_at", "date", "timestamp"],
-    "author"  : ["author", "username", "account"],
+    "author": ["author", "username", "account", "page"],
 }
 
 def _norm(s: str) -> str:
-    """Normalize header: lowercase, strip spaces, keep alnum only."""
-    import re
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 def auto(cols, key):
     norm_cols = [_norm(c) for c in cols]
     for alias in ALIASES[key]:
-        norm_alias = _norm(alias)
-        if norm_alias in norm_cols:
-            return cols[norm_cols.index(norm_alias)]
-        # also accept alias as substring of column
+        na = _norm(alias)
         for i, nc in enumerate(norm_cols):
-            if norm_alias in nc or nc in norm_alias:
+            if na == nc or na in nc or nc in na:
                 return cols[i]
     return None
 
 cols_main = df_main.columns.tolist()
 map_cols = {k: auto(cols_main, k) for k in ALIASES}
 
-st.sidebar.header("Map columns (MAIN CSV)")
+st.sidebar.header("Column mapping")
 for k, label in zip(
-    ["likes", "comments", "reposts", "views", "content", "url", "timestamp", "author"],
-    ["Likes", "Replies", "Reposts", "Views", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
+    ["likes", "replies", "reposts", "views", "content", "url", "timestamp", "author"],
+    ["Likes", "Replies", "Reposts", "Views (opt.)", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
     opts = [None] + cols_main
-    idx = opts.index(map_cols[k]) if map_cols[k] else 0
-    map_cols[k] = st.sidebar.selectbox(label, opts, index=idx, key=k)
+    map_cols[k] = st.sidebar.selectbox(label, opts, index=opts.index(map_cols[k]) if map_cols[k] else 0, key=k)
 
-# mandatory columns now exclude "views" (optional)
-if None in [map_cols[c] for c in ("likes", "comments", "reposts", "author")]:
-    st.error("Please map at least likes, replies, reposts and author columns.")
-    st.stop()
+# mandatory (views optional)
+for must in ("likes", "replies", "reposts", "author"):
+    if map_cols[must] is None:
+        st.error("Map at least likes, replies, reposts, author.")
+        st.stop()
 
-if map_cols["views"] is None:
-    st.warning("Views column not mapped – engagement rate will be skipped.")
-
-# ───────────────────────── Enrich helper ─────────────────────────
+# ─── Enrich helper ───────────────────────────────────────────────────
 
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"], map_cols["views"]):
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    # numeric casts
+    for col_key in ("likes", "replies", "reposts", "views"):
+        if map_cols[col_key] and map_cols[col_key] in df.columns:
+            df[map_cols[col_key]] = pd.to_numeric(df[map_cols[col_key]], errors="coerce").fillna(0).astype(int)
+    df["total_interactions"] = df[[map_cols["likes"], map_cols["replies"], map_cols["reposts"]]].sum(axis=1)
 
-    df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
-    df["eng_rate_%"] = (df["total_interactions"] / df[map_cols["views"]]) * 100
+    if map_cols["views"]:
+        df["eng_rate_%"] = (df["total_interactions"] / df[map_cols["views"]]).replace([float("inf"), -float("inf")], 0) * 100
+    else:
+        df["eng_rate_%"] = None
 
     if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
         ts = map_cols["timestamp"]
@@ -99,19 +95,19 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["date_time"] = "NA"
 
-    df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
     return df
 
 df_main = enrich(df_main)
 df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
 
 MAIN_BRAND = df_main[map_cols["author"]].mode()[0]
+
 df_main["brand"] = MAIN_BRAND
 if not df_comp.empty:
     df_comp["brand"] = df_comp[map_cols["author"]]
 
-# ───────────────────────── Tabs setup ─────────────────────────
-TABS = ["Overview", "Top 10", "Google Insight"]
+# ─── Tabs ────────────────────────────────────────────────────────────
+TABS = ["Overview", "Top 10"]
 if not df_comp.empty:
     TABS.insert(1, "Compare")
 TABS.append("Raw")
@@ -119,70 +115,46 @@ TABS.append("Raw")
 pages = st.tabs(["🐦 " + t for t in TABS])
 idx = {n: i for i, n in enumerate(TABS)}
 
-# ───────── Overview ─────────
+# Overview
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
-    a, b, c, d, e = st.columns(5)
-    a.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
-    b.metric("Avg Replies", f"{df_main[map_cols['comments']].mean():.1f}")
-    c.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
-    d.metric("Avg Views", f"{df_main[map_cols['views']].mean():.1f}")
-    e.metric("Avg Eng.%", f"{df_main['eng_rate_%'].mean():.2f}%")
+    cols = st.columns(5 if map_cols["views"] else 4)
+    cols[0].metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
+    cols[1].metric("Avg Replies", f"{df_main[map_cols['replies']].mean():.1f}")
+    cols[2].metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
+    if map_cols["views"]:
+        cols[3].metric("Avg Views", f"{df_main[map_cols['views']].mean():.1f}")
+        cols[4].metric("Avg Eng.%", f"{df_main['eng_rate_%'].mean():.2f}%")
+    else:
+        cols[3].metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
 
-    st.altair_chart(
-        alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
-            x="total_interactions", y=map_cols["views"], color="google_topic:N",
-            tooltip=[map_cols["content"], "total_interactions", map_cols["views"]],
-        ).interactive(), use_container_width=True
-    )
+# Top‑10
+with pages[idx["Top 10"]]:
+    st.subheader("Top 10 Tweets – " + MAIN_BRAND)
+    top10 = df_main.sort_values("total_interactions", ascending=False).head(10)
+    show = [map_cols["content"], "date_time", map_cols["likes"], map_cols["replies"], map_cols["reposts"], "total_interactions"]
+    if map_cols["views"]:
+        show.append(map_cols["views"])
+        show.append("eng_rate_%")
+    st.dataframe(top10[show])
 
-# ───────── Compare ─────────
+# Compare
 if "Compare" in TABS:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
-        combo = pd.concat([df_main, df_comp])
-        agg = combo.groupby("brand").agg(
-            posts=(map_cols["likes"], "count"),
-            avg_views=(map_cols["views"], "mean"),
-            avg_eng=("eng_rate_%", "mean"),
-            avg_total=("total_interactions", "mean"),
+        comb = pd.concat([df_main, df_comp])
+        grp = comb.groupby("brand").agg(
+            tweets=(map_cols["likes"], "count"),
+            avg_interactions=("total_interactions", "mean"),
         ).reset_index()
-        st.dataframe(agg, use_container_width=True)
+        if map_cols["views"]:
+            grp["avg_views"] = comb.groupby("brand")[map_cols["views"]].mean().values
+            grp["avg_eng_%"] = comb.groupby("brand")["eng_rate_%"].mean().values
+        st.dataframe(grp)
 
-# ───────── Top‑10 ─────────
-with pages[idx["Top 10"]]:
-    st.subheader("Top 10 tweets – " + MAIN_BRAND)
-    top10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
-    top10["Tweet"] = top10[map_cols["content"]].astype(str).str.slice(0, 80)
-    st.table(top10[["Tweet", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], map_cols["views"], "eng_rate_%"]])
-
-# ───────── Google Insight ─────────
-with pages[idx["Google Insight"]]:
-    st.subheader("Google topic insight")
-    hi = df_main[df_main["total_interactions"] >= 10]
-    lo = df_main[df_main["total_interactions"] < 10]
-
-    st.metric("High tweets about Google", int(hi[hi["google_topic"]].shape[0]))
-    st.metric("High tweets non‑Google", int(hi[~hi["google_topic"]].shape[0]))
-
-# ───────── Raw ─────────
+# Raw
 with pages[idx["Raw"]]:
-    st.subheader("Raw data & downloads")
-    st.dataframe(df_main, use_container_width=True)
-
-    st.download_button(
-        label="Download main enriched CSV",
-        data=df_main.to_csv(index=False).encode(),
-        file_name="main_enriched_x.csv",
-        key="dl_main",
-    )
-
+    st.dataframe(df_main)
+    st.download_button("Download enriched CSV", df_main.to_csv(index=False).encode(), "enriched_x.csv")
     if not df_comp.empty:
-        st.download_button(
-            label="Download competitor enriched CSV",
-            data=df_comp.to_csv(index=False).encode(),
-            file_name="comp_enriched_x.csv",
-            key="dl_comp",
-        )
-
-# End of file
+        st.download_button("Download competitor enriched CSV", df_comp.to

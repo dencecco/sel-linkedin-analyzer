@@ -153,4 +153,22 @@ with pages[idx["Google Insight"]]:
 
 # ───────── Raw ─────────
 with pages[idx["Raw"]]:
-    st.dataframe(df_main, use_container
+    st.subheader("Raw data & downloads")
+    st.dataframe(df_main, use_container_width=True)
+
+    st.download_button(
+        label="Download main enriched CSV",
+        data=df_main.to_csv(index=False).encode(),
+        file_name="main_enriched_x.csv",
+        key="dl_main",
+    )
+
+    if not df_comp.empty:
+        st.download_button(
+            label="Download competitor enriched CSV",
+            data=df_comp.to_csv(index=False).encode(),
+            file_name="comp_enriched_x.csv",
+            key="dl_comp",
+        )
+
+# End of file

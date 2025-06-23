@@ -135,11 +135,24 @@ with pages[idx["Overview"]]:
 # Top‑10
 with pages[idx["Top 10"]]:
     st.subheader("Top 10 Tweets – " + MAIN)
-    t10 = df_main.sort_values("total_interactions", ascending=False).head(10)
-    cols_show = [map_cols["content"], "date_time", map_cols["likes"], map_cols["replies"], map_cols["reposts"], "total_interactions"]
+    t10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
+
+    # clickable link if URL column mapped
+    if map_cols["url"] and map_cols["url"] in df_main.columns:
+        def make_link(row):
+            url = row[map_cols["url"]]
+            text = str(row[map_cols["content"]])[:80]
+            return f"<a href='{url}' target='_blank'>{text}</a>"
+        t10["Tweet"] = t10.apply(make_link, axis=1)
+        first_col = "Tweet"
+    else:
+        first_col = map_cols["content"]
+
+    cols_show = [first_col, "date_time", map_cols["likes"], map_cols["replies"], map_cols["reposts"], "total_interactions"]
     if map_cols["views"]:
         cols_show += [map_cols["views"], "eng_rate_%"]
-    st.dataframe(t10[cols_show])
+
+    st.write(t10[cols_show].to_html(escape=False), unsafe_allow_html=True)
 
 # Compare
 if "Compare" in TABS:

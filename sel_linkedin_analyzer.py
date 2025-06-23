@@ -79,10 +79,12 @@ if map_cols["timestamp"]:
 else:
     df["date_time"] = "NA"
 
+# Flag true reposts (not shares received)
 if "action" in df.columns:
-    df["is_repost"] = df["action"].str.lower().eq("repost") | (df[map_cols["reposts"]] > 0)
+    # Rely solely on the metadata from the platform: "Repost" vs "Post"
+    df["is_repost"] = df["action"].str.lower().eq("repost")
 else:
-    df["is_repost"] = df[map_cols["reposts"]] > 0
+    df["is_repost"] = False
 
 # ----------------------------------------------------------------------
 # 4. Tabs

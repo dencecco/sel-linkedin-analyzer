@@ -41,7 +41,7 @@ ALIASES = {
     "reposts": ["retweet_count", "repost_count", "shares"],
     "views":   ["view_count", "view count", "viewcount", "impressions", "impression_count"],
     "content": ["text", "tweet", "message"],
-    "url":     ["url", "tweet_url", "tweetlink" ],,
+    "url":     ["url", "tweet_url", "tweetlink"],
     "timestamp": ["created_at", "date", "timestamp"],
     "author":  ["author", "username", "account", "page", "handle"],
 }
@@ -163,7 +163,7 @@ if "Compare" in TABS:
             tweets=("total_interactions", "size"),
             avg_interactions=("total_interactions", "mean")
         ).reset_index()
-        st.dataframe(agg, use_container_width=True)(agg)
+        st.dataframe(agg, use_container_width=True)
 
 # Raw
 with pages[idx["Raw"]]:

@@ -1,24 +1,21 @@
 """
-LinkedIn / Social CSV Analyzer
-==============================
+LinkedIn / Multi‑Social CSV Analyzer
+===================================
 
-Streamlit web‑app to explore **any** social‑media CSV export (LinkedIn, X, FB, IG…)
-with automatic KPIs, Top‑10 posts, and flexible column mapping.
+Streamlit app to inspect **any** social‑media CSV (LinkedIn, X, Facebook, IG …)
+with KPIs, Top‑10 posts (link + date‑time), weekday/month views and comment‑interaction correlation.
 
-### New features
-* **Link column** (clickable) & **date‑time** shown in Top‑10 table.
-* Extra tabs: _Overview_, _Top‑10_, _By Day‑of‑Week_, _By Month_, _Raw Data_.
-* Auto‑detect common column names **or** let the user map columns via sidebar.
-
-> Required metrics columns (or their aliases): likes, comments, reposts/retweets.  
-> Optional: impressions/views.
+### 2025‑06‑23 Update
+* **Better timestamp detection** (supports `createdTime`, `created_time`, `date_time`).
+* **Date‑Time column** shows formatted string (`YYYY‑MM‑DD HH:MM`).
+* **Correlation panel**: shows Pearson *r* between *comments* and *total interactions*.
 """
 
 import streamlit as st
 import pandas as pd
 import altair as alt
-from datetime import datetime
-from io import StringIO
+import numpy as np
+from pathlib import Path
 
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
 st.title("📊 Universal Social CSV Analyzer")
@@ -39,33 +36,36 @@ st.success(f"Loaded {len(df):,} rows ✅")
 # ----------------------------------------------------------------------
 
 def suggest(col_names, aliases):
+    """Return first column name matching any alias (case‑insensitive)."""
     for alias in aliases:
         for c in col_names:
             if alias.lower() == c.lower():
                 return c
     return None
 
-col_candidates = list(df.columns)
-like_col     = suggest(col_candidates, ["likeCount", "likes", "favorite_count", "reactionCount"])
-comment_col  = suggest(col_candidates, ["commentCount", "comments", "reply_count"])
-repost_col   = suggest(col_candidates, ["repostCount", "shares", "retweet_count"])
-imp_col      = suggest(col_candidates, ["impressions", "views", "reach"])
-content_col  = suggest(col_candidates, ["postContent", "text", "message", "caption"])
-url_col      = suggest(col_candidates, ["postUrl", "url", "link"])
-stamp_col    = suggest(col_candidates, ["postTimestamp", "created_at", "timestamp", "date"])
+cols = list(df.columns)
+like_col    = suggest(cols, ["likeCount", "likes", "favorite_count", "reactionCount"])
+comment_col = suggest(cols, ["commentCount", "comments", "reply_count"])
+repost_col  = suggest(cols, ["repostCount", "shares", "retweet_count"])
+imp_col     = suggest(cols, ["impressions", "views", "reach"])
+content_col = suggest(cols, ["postContent", "text", "message", "caption"])
+url_col     = suggest(cols, ["postUrl", "url", "link"])
+stamp_col   = suggest(cols, [
+    "postTimestamp", "created_at", "createdTime", "created_time", "timestamp", "date", "date_time"
+])
 
-st.sidebar.markdown("### Column mapping (edit if auto‑detect is wrong)")
-like_col    = st.sidebar.selectbox("Likes column",     options=[None]+col_candidates, index=col_candidates.index(like_col) if like_col else 0)
-comment_col = st.sidebar.selectbox("Comments column", options=[None]+col_candidates, index=col_candidates.index(comment_col) if comment_col else 0)
-repost_col  = st.sidebar.selectbox("Reposts/Shares",  options=[None]+col_candidates, index=col_candidates.index(repost_col) if repost_col else 0)
-imp_col     = st.sidebar.selectbox("Impressions (opt.)", options=[None]+col_candidates, index=col_candidates.index(imp_col) if imp_col else 0)
-content_col = st.sidebar.selectbox("Content column",  options=[None]+col_candidates, index=col_candidates.index(content_col) if content_col else 0)
-url_col     = st.sidebar.selectbox("URL column (opt.)", options=[None]+col_candidates, index=col_candidates.index(url_col) if url_col else 0)
-stamp_col   = st.sidebar.selectbox("Timestamp column (opt.)", options=[None]+col_candidates, index=col_candidates.index(stamp_col) if stamp_col else 0)
+st.sidebar.header("Column mapping")
+like_col    = st.sidebar.selectbox("Likes",     [None]+cols, index=cols.index(like_col) if like_col else 0)
+comment_col = st.sidebar.selectbox("Comments", [None]+cols, index=cols.index(comment_col) if comment_col else 0)
+repost_col  = st.sidebar.selectbox("Reposts",   [None]+cols, index=cols.index(repost_col) if repost_col else 0)
+imp_col     = st.sidebar.selectbox("Impressions (opt.)", [None]+cols, index=cols.index(imp_col) if imp_col else 0)
+content_col = st.sidebar.selectbox("Content",   [None]+cols, index=cols.index(content_col) if content_col else 0)
+url_col     = st.sidebar.selectbox("URL (opt.)",[None]+cols, index=cols.index(url_col) if url_col else 0)
+stamp_col   = st.sidebar.selectbox("Timestamp (opt.)", [None]+cols, index=cols.index(stamp_col) if stamp_col else 0)
 
 metric_cols = [like_col, comment_col, repost_col]
 if None in metric_cols:
-    st.error("❌ Please map at least like, comment, and repost columns.")
+    st.error("❌ Map at least likes, comments and repost columns.")
     st.stop()
 
 # ----------------------------------------------------------------------
@@ -81,32 +81,36 @@ if stamp_col:
     df["date"] = df[stamp_col].dt.date
     df["weekday"] = df[stamp_col].dt.day_name()
     df["month"] = df[stamp_col].dt.to_period("M").astype(str)
+    df["date_time"] = df[stamp_col].dt.strftime("%Y-%m-%d %H:%M")
 else:
     df["weekday"] = "Unknown"
     df["month"] = "Unknown"
+    df["date_time"] = "NA"
 
 if imp_col:
     df[imp_col] = pd.to_numeric(df[imp_col], errors="coerce")
     df["eng_rate_%"] = (df["total_interactions"] / df[imp_col]) * 100
 
 # ----------------------------------------------------------------------
-# 4. UI – Tabs
+# 4. Tabs
 # ----------------------------------------------------------------------
 
-tab_overview, tab_top, tab_week, tab_month, tab_raw = st.tabs([
-    "📈 Overview", "🏆 Top 10", "📅 By Weekday", "🗓 By Month", "📝 Raw data"
+t_overview, t_top, t_week, t_month, t_raw = st.tabs([
+    "📈 Overview", "🏆 Top 10", "📅 Weekday", "🗓 Month", "🔧 Raw"
 ])
 
 # ---------- Overview ----------
-with tab_overview:
-    k1,k2,k3,k4 = st.columns(4)
-    k1.metric("Avg Likes",     f"{df[like_col].mean():.2f}")
-    k2.metric("Avg Comments",  f"{df[comment_col].mean():.2f}")
-    k3.metric("Avg Reposts",   f"{df[repost_col].mean():.2f}")
-    k4.metric("Avg Interactions", f"{df['total_interactions'].mean():.2f}")
+with t_overview:
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Avg Likes", f"{df[like_col].mean():.2f}")
+    c2.metric("Avg Comments", f"{df[comment_col].mean():.2f}")
+    c3.metric("Avg Reposts", f"{df[repost_col].mean():.2f}")
+    c4.metric("Avg Interactions", f"{df['total_interactions'].mean():.2f}")
 
-    # Correlation scatter
-    st.markdown("#### Comment correlation")
+    # Scatter + Pearson r
+    pearson_r = np.corrcoef(df["total_interactions"], df[comment_col])[0,1]
+    st.markdown(f"#### Comments vs Total interactions  
+    Pearson **r = {pearson_r:.2f}**")
     scatter = alt.Chart(df).mark_circle(size=60, opacity=0.6).encode(
         x="total_interactions",
         y=comment_col,
@@ -115,19 +119,16 @@ with tab_overview:
     st.altair_chart(scatter, use_container_width=True)
 
 # ---------- Top‑10 ----------
-with tab_top:
-    st.markdown("#### Top 10 posts by total interactions")
+with t_top:
+    st.markdown("#### Top 10 posts by interactions")
     top10 = df.sort_values("total_interactions", ascending=False).head(10).copy()
 
-    # Add clickable link and date‑time
     if url_col:
         top10["link"] = top10[url_col].apply(lambda x: f"🔗 [Open]({x})" if pd.notna(x) else "")
-    if stamp_col:
-        top10["date_time"] = top10[stamp_col].astype(str)
 
     display_cols = [
         "link" if url_col else None,
-        "date_time" if stamp_col else None,
+        "date_time",
         content_col,
         like_col, comment_col, repost_col, "total_interactions"
     ]
@@ -135,36 +136,25 @@ with tab_top:
 
     st.dataframe(top10[display_cols], use_container_width=True)
 
-# ---------- By Weekday ----------
-with tab_week:
-    st.markdown("#### Average interactions by weekday")
+# ---------- Weekday ----------
+with t_week:
+    st.markdown("#### Avg interactions by weekday")
     week_df = (df.groupby("weekday")[[like_col, comment_col, repost_col, "total_interactions"]]
                  .mean().round(2).reset_index())
     st.dataframe(week_df)
-    bar = alt.Chart(week_df).mark_bar().encode(
-        x="weekday",
-        y="total_interactions",
-        tooltip=["total_interactions"]
-    )
-    st.altair_chart(bar, use_container_width=True)
+    st.altair_chart(alt.Chart(week_df).mark_bar().encode(
+        x="weekday", y="total_interactions"), use_container_width=True)
 
-# ---------- By Month ----------
-with tab_month:
+# ---------- Month ----------
+with t_month:
     st.markdown("#### Total interactions by month")
-    month_df = (df.groupby("month")[["total_interactions"]].sum().reset_index())
+    month_df = (df.groupby("month")["total_interactions"].sum().reset_index())
     st.dataframe(month_df)
-    line = alt.Chart(month_df).mark_line(point=True).encode(
-        x="month",
-        y="total_interactions"
-    )
-    st.altair_chart(line, use_container_width=True)
+    st.altair_chart(alt.Chart(month_df).mark_line(point=True).encode(
+        x="month", y="total_interactions"), use_container_width=True)
 
-# ---------- Raw data ----------
-with tab_raw:
+# ---------- Raw ----------
+with t_raw:
     st.dataframe(df, use_container_width=True)
-    st.download_button(
-        label="Download enriched CSV",
-        data=df.to_csv(index=False).encode("utf-8"),
-        file_name="enriched_social_data.csv",
-        mime="text/csv"
-    )
+    st.download_button("Download enriched CSV", df.to_csv(index=False).encode(), "enriched_data.csv")
+

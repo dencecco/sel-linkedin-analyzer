@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
 optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
 Insight · Raw.
-Last update: 2025‑06‑27 – fixed bracket syntax error.
+Last update: 2025‑06‑27 – fixed CSV reading and bracket syntax error.
 """
 
 import streamlit as st
@@ -12,6 +12,7 @@ import pandas as pd
 import altair as alt
 import re
 from datetime import timedelta
+import io
 
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
 st.title("📊 Universal Social CSV Analyzer – with Competitor Benchmark")
@@ -24,9 +25,35 @@ if main_file is None:
 
 comp_file = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="csv", key="comp")
 
+# New robust CSV reading function
+def robust_read_csv(file):
+    """Read CSV with multiple fallback methods"""
+    # First try standard read
+    try:
+        return pd.read_csv(file)
+    except pd.errors.ParserError:
+        try:
+            # Try with different engines and error handling
+            return pd.read_csv(file, engine='python', on_bad_lines='warn')
+        except:
+            try:
+                # Try with different encoding
+                return pd.read_csv(file, encoding='latin1')
+            except:
+                # Final fallback - read as text and clean
+                content = file.getvalue().decode('utf-8', errors='ignore')
+                lines = content.split('\n')
+                cleaned = []
+                for line in lines:
+                    # Simple cleaning of malformed lines
+                    if line.count(',') < 5:  # If too few columns
+                        continue
+                    cleaned.append(line)
+                return pd.read_csv(io.StringIO('\n'.join(cleaned)))
+
 try:
-    df_main = pd.read_csv(main_file)
-    df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
+    df_main = robust_read_csv(main_file)
+    df_comp = robust_read_csv(comp_file) if comp_file else pd.DataFrame()
 except Exception as e:
     st.error(f"Error reading CSV: {str(e)}")
     st.stop()
@@ -275,7 +302,7 @@ with pages[idx["Google Insight"]]:
         low_google = segments["Low <10 • Google"]
         
         if not low_google.empty:
-            # FIXED: Simplified to avoid bracket confusion
+            # Simplified to avoid bracket confusion
             columns_to_show = [
                 map_cols["content"], 
                 "date_time", 

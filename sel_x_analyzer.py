@@ -1,192 +1,212 @@
-import re
+"""
+LinkedIn / Multi‑Social CSV Analyzer
+===================================
+Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
+optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
+Insight · Raw.
+Last update: 2025‑06‑27 – fixed scatter plot and Google Insight section.
+"""
+
 import streamlit as st
 import pandas as pd
-import pandas.errors as pde
+import altair as alt
+from datetime import timedelta
 
-# ── Page config ──────────────────────────────────────────────────────────
-st.set_page_config(page_title="🐦 X CSV Analyzer – Enhanced", layout="wide")
-st.title("🐦 X (Twitter) CSV Analyzer – Enhanced Edition")
+st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
+st.title("📊 Universal Social CSV Analyzer – with Competitor Benchmark")
 
-# ── File uploads ─────────────────────────────────────────────────────────
+# ───────────────────────────────────── Uploads ──────────────────────────────────────
 main_file = st.sidebar.file_uploader("Upload MAIN brand CSV", type="csv", key="main")
 if main_file is None:
     st.info("⬅️ Upload your main brand CSV to start.")
     st.stop()
-comp_file = st.sidebar.file_uploader("Upload COMPETITOR CSV (optional)", type="csv", key="comp")
 
-# ── Robust CSV reader ──────────────────────────────────────────────────────
-def safe_read(file):
-    try:
-        return pd.read_csv(file, low_memory=False)
-    except pde.ParserError:
-        file.seek(0)
-        try:
-            return pd.read_csv(file, sep=';', low_memory=False)
-        except pde.ParserError:
-            file.seek(0)
-            return pd.read_csv(file, sep=None, engine='python', on_bad_lines='skip')
+comp_file = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="csv", key="comp")
 
-# ── Read dataframes ───────────────────────────────────────────────────────
-df_main = safe_read(main_file)
+df_main = pd.read_csv(main_file)
+df_comp = pd.read_csv(comp_file) if comp_file else pd.DataFrame()
 
-df_comp = safe_read(comp_file) if comp_file else pd.DataFrame()
-
-# ── Column mapping for MAIN ─────────────────────────────────────────────────
+# ─────────────────────────────────── Column mapping ──────────────────────────────────
 ALIASES = {
-    "likes":   ["like_count", "likes", "favorite_count", "likecount"],
-    "replies": ["reply_count", "replies", "comments", "commentcount"],
-    "reposts": ["retweet_count", "retweetcount", "repost_count", "shares"],
-    "views":   ["view_count", "impression_count", "views", "impressions"],
-    "content": ["text", "tweet", "message"],
-    "url":     ["url", "tweet_url", "tweetlink"],
-    "timestamp": ["created_at", "date", "timestamp"],
-    "author":  ["author", "username", "account", "handle"]
+    "likes": ["likecount", "likes", "favorite_count", "reactioncount"],
+    "comments": ["commentcount", "comments", "reply_count"],
+    "reposts": ["repostcount", "shares", "retweet_count"],
+    "content": ["postcontent", "text", "message", "caption"],
+    "url": ["posturl", "url", "link"],
+    "timestamp": ["posttimestamp", "created_at", "createdtime", "created_time", "timestamp", "date"],
+    "author": ["author", "pagename", "company", "account"],
 }
 
-
-def _norm(col):
-    return re.sub(r"[^a-z0-9]", "", col.lower())
-
-
-def auto_map(cols, key):
-    normed = [_norm(c) for c in cols]
+def auto(col_list, key):
+    lower = [c.lower() for c in col_list]
     for alias in ALIASES[key]:
-        na = _norm(alias)
-        for i, n in enumerate(normed):
-            if na == n or na in n or n in na:
-                return cols[i]
+        if alias in lower:
+            return col_list[lower.index(alias)]
     return None
 
-# ── Map main columns ───────────────────────────────────────────────────────
 cols_main = df_main.columns.tolist()
-map_main = {k: auto_map(cols_main, k) for k in ALIASES}
+map_cols = {k: auto(cols_main, k) for k in ALIASES}
 
-st.sidebar.header("Map columns (Main CSV)")
-for key, label in zip(
-    ["likes","replies","reposts","views","content","url","timestamp","author"],
-    ["Likes","Replies","Reposts","Views (opt.)","Content","URL (opt.)","Timestamp (opt.)","Author"]
-):
+st.sidebar.header("Map columns (MAIN CSV)")
+for k, label in zip(
+    ["likes", "comments", "reposts", "content", "url", "timestamp", "author"],
+    ["Likes", "Comments", "Reposts", "Content", "URL (opt.)", "Timestamp (opt.)", "Author"]):
     opts = [None] + cols_main
-    default = opts.index(map_main.get(key)) if map_main.get(key) in opts else 0
-    map_main[key] = st.sidebar.selectbox(label, opts, index=default, key=key)
+    idx_default = opts.index(map_cols[k]) if map_cols[k] else 0
+    map_cols[k] = st.sidebar.selectbox(label, opts, index=idx_default, key=k)
 
-# Validate mandatory mappings
-for req in ("likes","replies","reposts","author"):
-    if map_main[req] is None:
-        st.error(f"Map the '{req}' column before proceeding.")
-        st.stop()
+if None in [map_cols[c] for c in ("likes", "comments", "reposts", "author")]:
+    st.error("Please map at least likes, comments, reposts and author.")
+    st.stop()
 
-# Ensure optional mappings exist
-for opt in ("views","content","url","timestamp"):
-    if map_main[opt] is None:
-        map_main[opt] = f"_{opt}"
+# ────────────────────────────── Helper: enrich dataframe ─────────────────────────────
 
-# ── Normalize competitor schema ─────────────────────────────────────────────
-if not df_comp.empty:
-    cols_comp = df_comp.columns.tolist()
-    map_comp = {k: auto_map(cols_comp, k) for k in ALIASES}
-    # Rename competitor columns to main mapping
-    rename_dict = {}
-    for k in ALIASES:
-        src = map_comp.get(k)
-        tgt = map_main[k]
-        if src and src in df_comp.columns:
-            rename_dict[src] = tgt
-    df_comp = df_comp.rename(columns=rename_dict)
-    # Add any missing columns
-    for k in map_main:
-        col = map_main[k]
-        if col not in df_comp.columns:
-            df_comp[col] = 0 if k in ("likes","replies","reposts","views") else pd.NA
-
-# ── Enrichment function ────────────────────────────────────────────────────
-def enrich(df, mapping):
+def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # Numeric cast
-    for k in ("likes","replies","reposts","views"):
-        col = mapping[k]
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-    # Compute total interactions & engagement rate
-    df["total_interactions"] = (
-        df[mapping["likes"]] + df[mapping["replies"]] + df[mapping["reposts"]]
-    )
-    df["eng_rate_%"] = (
-        df["total_interactions"] / df[mapping["views"]].replace({0: pd.NA}) * 100
-    )
-    # Timestamp parsing
-    ts = mapping.get("timestamp")
-    try:
-        df[ts] = pd.to_datetime(df[ts], errors='coerce')
+    # numeric clean
+    for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    df["total_interactions"] = df[[map_cols["likes"], map_cols["comments"], map_cols["reposts"]]].sum(axis=1)
+
+    # timestamp
+    if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
+        ts = map_cols["timestamp"]
+        df[ts] = pd.to_datetime(df[ts], errors="coerce")
         df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
-    except Exception:
+    else:
         df["date_time"] = "NA"
+
+    # topic flag
+    df["google_topic"] = df[map_cols["content"]].astype(str).str.contains("google", case=False, na=False)
     return df
 
-# ── Apply enrichment ───────────────────────────────────────────────────────
-df_main = enrich(df_main, map_main)
-if not df_comp.empty:
-    df_comp = enrich(df_comp, map_main)
+df_main = enrich(df_main)
+df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
 
-# ── Label brands ───────────────────────────────────────────────────────────
-MAIN_BRAND = df_main[map_main["author"]].mode()[0]
+MAIN_BRAND = df_main[map_cols["author"]].mode()[0]
+
 df_main["brand"] = MAIN_BRAND
 if not df_comp.empty:
-    df_comp["brand"] = df_comp[map_main["author"]]
+    df_comp["brand"] = df_comp[map_cols["author"]]
 
-# ── UI Tabs ─────────────────────────────────────────────────────────────────
-tabs = ["Overview"]
+# ───────────────────────────────────── Tabs ────────────────────────────────────────
+TABS = ["Overview", "Top 10", "Google Insight"]
 if not df_comp.empty:
-    tabs.append("Compare")
-tabs.extend(["Top 10", "Raw"] )
-pages = st.tabs([f"🐦 {t}" for t in tabs])
-idx = {t: i for i, t in enumerate(tabs)}
+    TABS.insert(1, "Compare")
+TABS.append("Raw")
 
-# ── Overview tab ─────────────────────────────────────────────────────────
+pages = st.tabs(["📊 " + t for t in TABS])
+idx = {name: i for i, name in enumerate(TABS)}
+
+# ─────────────────────────────── Overview tab ──────────────────────────────────────
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
-    cols = st.columns(5)
-    cols[0].metric("Avg Likes", f"{df_main[map_main['likes']].mean():.1f}")
-    cols[1].metric("Avg Replies", f"{df_main[map_main['replies']].mean():.1f}")
-    cols[2].metric("Avg Reposts", f"{df_main[map_main['reposts']].mean():.1f}")
-    cols[3].metric("Avg Views", f"{df_main[map_main['views']].mean():.1f}")
-    cols[4].metric("Avg Eng.%", f"{df_main['eng_rate_%'].mean():.2f}%")
+    a, b, c, d = st.columns(4)
+    a.metric("Avg Likes", f"{df_main[map_cols['likes']].mean():.1f}")
+    b.metric("Avg Comments", f"{df_main[map_cols['comments']].mean():.1f}")
+    c.metric("Avg Reposts", f"{df_main[map_cols['reposts']].mean():.1f}")
+    d.metric("Avg Interactions", f"{df_main['total_interactions'].mean():.1f}")
 
-# ── Compare tab ──────────────────────────────────────────────────────────
-if not df_comp.empty:
+    st.markdown("#### Scatter: Comments vs Likes (Google color)")
+    st.altair_chart(
+        alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
+            x=map_cols["likes"],  # Changed to likes instead of total_interactions
+            y=map_cols["comments"],
+            color="google_topic:N",
+            tooltip=[map_cols["content"], map_cols["likes"], map_cols["comments"]],
+        ).interactive(),
+        use_container_width=True,
+    )
+
+# ─────────────────────────────── Compare tab ──────────────────────────────────────
+if "Compare" in TABS:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
         combined = pd.concat([df_main, df_comp], ignore_index=True)
+
         agg = combined.groupby("brand").agg(
-            posts=(map_main['likes'], 'count'),
-            avg_likes=(map_main['likes'], 'mean'),
-            avg_replies=(map_main['replies'], 'mean'),
-            avg_reposts=(map_main['reposts'], 'mean'),
-            avg_total=("total_interactions", 'mean'),
-            avg_views=(map_main['views'], 'mean'),
-            avg_eng=("eng_rate_%", 'mean')
+            posts=(map_cols["likes"], "count"),
+            avg_likes=(map_cols["likes"], "mean"),
+            avg_comments=(map_cols["comments"], "mean"),
+            avg_reposts=(map_cols["reposts"], "mean"),
+            avg_total=("total_interactions", "mean"),
         ).reset_index()
-        def hl(r): return ['background-color:#dfe6fd' if r['brand']==MAIN_BRAND else '' for _ in r]
-        fmt = {c: "{:.1f}" for c in agg.columns if c not in ['brand', 'posts']}
-        st.dataframe(agg.style.apply(hl, axis=1).format(fmt), use_container_width=True)
 
-# ── Top 10 tab ───────────────────────────────────────────────────────────
+        if map_cols["timestamp"] and map_cols["timestamp"] in combined.columns:
+            span = (combined[map_cols["timestamp"]].max() - combined[map_cols["timestamp"]].min()).days / 7
+            span = max(span, 1)
+            agg["posts_per_week"] = agg["posts"] / span
+
+        hl = lambda row: ["background-color:#dfe6fd" if row["brand"] == MAIN_BRAND else "" for _ in row]
+        fmts = {c: "{:.1f}" for c in agg.columns if c != "brand"}
+        st.dataframe(agg.style.apply(hl, axis=1).format(fmts), use_container_width=True)
+
+# ─────────────────────────────── Top‑10 tab ──────────────────────────────────────
 with pages[idx["Top 10"]]:
-    st.subheader(f"Top 10 Tweets – {MAIN_BRAND}")
-    t10 = df_main.nlargest(10, 'total_interactions').copy()
-    if map_main['url'] and map_main['url'] in t10.columns:
-        t10['Tweet'] = t10.apply(
-            lambda r: f"<a href='{r[map_main['url']]}' target='_blank'>{str(r[map_main['content']])[:80]}</a>", axis=1
-        )
-        display_col = 'Tweet'
-    else:
-        display_col = map_main['content']
-    cols_show = [display_col, 'date_time', map_main['likes'], map_main['replies'], map_main['reposts'], 'total_interactions', map_main['views'], 'eng_rate_%']
-    st.write(t10[cols_show].to_html(escape=False), unsafe_allow_html=True)
+    st.subheader(f"Top 10 posts – {MAIN_BRAND}")
+    top10 = df_main.sort_values("total_interactions", ascending=False).head(10).copy()
 
-# ── Raw & Download tab ────────────────────────────────────────────────────
+    def linkify(r):
+        if map_cols["url"] and pd.notna(r[map_cols["url"]]):
+            return f"<a href='{r[map_cols['url']]}' target='_blank'>{str(r[map_cols['content']])[:80]}</a>"
+        return str(r[map_cols["content"]])[:80]
+
+    top10["Post"] = top10.apply(linkify, axis=1)
+    show_cols = ["Post", "date_time", map_cols["likes"], map_cols["comments"], map_cols["reposts"], "total_interactions", "google_topic"]
+    st.write(top10[show_cols].to_html(escape=False), unsafe_allow_html=True)
+
+# ─────────────────────────────── Google Insight ───────────────────────────────────
+with pages[idx["Google Insight"]]:
+    st.subheader(f"Google topic insight – {MAIN_BRAND}")
+
+    # Segment definitions
+    high = df_main[df_main["total_interactions"] >= 10]  # High performers: ≥10 interactions
+    low  = df_main[df_main["total_interactions"] < 10]   # Low performers: <10 interactions
+
+    g_high = high[high["google_topic"]]
+    ng_high = high[~high["google_topic"]]
+    g_low = low[low["google_topic"]]
+    ng_low = low[~low["google_topic"]]
+
+    # KPI cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("High ≥10 • Google", len(g_high))
+    c2.metric("High ≥10 • non‑Google", len(ng_high))
+    c3.metric("Low <10 • Google", len(g_low))
+    c4.metric("Total Google posts", int(df_main["google_topic"].sum()))
+
+    # Changed section: Low performers with Google topic
+    st.markdown("#### Low performers **with** Google topic")
+    if g_low.empty:
+        st.info("No low‑performer with Google topic.")
+    else:
+        cols_show = [map_cols["content"], "date_time", "total_interactions"]
+        st.dataframe(g_low[cols_show])
+        st.download_button(
+            "Download CSV", g_low[cols_show].to_csv(index=False).encode(),
+            "low_google.csv", key="dl_g_low"  # Updated filename
+        )
+
+    # Summary table
+    st.markdown("#### Summary table")
+    summary = pd.DataFrame({
+        "Segment": [
+            "High Google", "High non‑Google", "Low Google", "Low non‑Google"
+        ],
+        "Posts": [len(g_high), len(ng_high), len(g_low), len(ng_low)],
+        "Avg interactions": [
+            g_high.total_interactions.mean(),
+            ng_high.total_interactions.mean() if len(ng_high) else 0,
+            g_low.total_interactions.mean(),
+            ng_low.total_interactions.mean() if len(ng_low) else 0,
+        ],
+    })
+    st.dataframe(summary.round(1))
+
+# ─────────────────────────────── Raw tab ─────────────────────────────────────────
 with pages[idx["Raw"]]:
-    st.subheader("Raw Data & Downloads")
+    st.subheader("Raw & Downloads")
     st.dataframe(df_main, use_container_width=True)
-    st.download_button("Download enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched_x.csv")
+    st.download_button("Download main enriched CSV", df_main.to_csv(index=False).encode(), "main_enriched.csv", key="dl_main")
     if not df_comp.empty:
-        st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched_x.csv")
+        st.download_button("Download competitor enriched CSV", df_comp.to_csv(index=False).encode(), "comp_enriched.csv", key="dl_comp")

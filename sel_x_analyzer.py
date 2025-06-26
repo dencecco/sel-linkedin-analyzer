@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
 optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
 Insight · Raw.
-Last update: 2025‑06‑27 – improved auto-detection and error handling.
+Last update: 2025‑06‑27 – fixed bracket syntax error.
 """
 
 import streamlit as st
@@ -275,7 +275,7 @@ with pages[idx["Google Insight"]]:
         low_google = segments["Low <10 • Google"]
         
         if not low_google.empty:
-            # FIXED HERE: Added missing closing bracket
+            # FIXED: Corrected bracket syntax here
             st.dataframe(low_google[[
                 map_cols["content"], 
                 "date_time", 

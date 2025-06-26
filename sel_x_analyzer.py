@@ -275,12 +275,13 @@ with pages[idx["Google Insight"]]:
         low_google = segments["Low <10 • Google"]
         
         if not low_google.empty:
-            # FIXED: Corrected bracket syntax here
-            st.dataframe(low_google[[
+            # FIXED: Simplified to avoid bracket confusion
+            columns_to_show = [
                 map_cols["content"], 
                 "date_time", 
                 "total_interactions"
-            ])
+            ]
+            st.dataframe(low_google[columns_to_show])
             
             st.download_button(
                 "Download Low Google Performers",

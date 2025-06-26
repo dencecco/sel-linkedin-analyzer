@@ -1,10 +1,10 @@
 """
 LinkedIn / Multi‑Social CSV Analyzer
 ===================================
-Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
-optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
-Insight · Raw.
-Last update: 2025‑06‑27 – fixed CSV reading for semicolon-delimited files.
+Streamlit app to analyse social media CSV exports for a **main brand** and
+optionally a **competitor file**. Supports LinkedIn, Twitter/X, Instagram, etc.
+Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
+Last update: 2025‑06‑27 – added platform flexibility and optional fields.
 """
 
 import streamlit as st
@@ -12,7 +12,6 @@ import pandas as pd
 import altair as alt
 import re
 import io
-import csv
 from datetime import timedelta
 
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
@@ -75,11 +74,11 @@ try:
     df_main = robust_read_csv(main_file)
     df_comp = robust_read_csv(comp_file) if comp_file else pd.DataFrame()
     
-    # If we have a file with semicolons as separators, clean the column names
-    if ';' in str(df_main.columns):
-        df_main.columns = [col.replace(';', '') for col in df_main.columns]
-    if comp_file and ';' in str(df_comp.columns):
-        df_comp.columns = [col.replace(';', '') for col in df_comp.columns]
+    # Clean column names
+    if not df_main.empty:
+        df_main.columns = [col.replace(';', '').strip() for col in df_main.columns]
+    if not df_comp.empty:
+        df_comp.columns = [col.replace(';', '').strip() for col in df_comp.columns]
     
 except Exception as e:
     st.error(f"Error reading CSV: {str(e)}")
@@ -117,9 +116,10 @@ def detect_columns(df):
         "comments": [r"comment", r"reply", r"commentcount"],
         "reposts": [r"repost", r"share", r"retweet", r"repostcount"],
         "content": [r"content", r"text", r"message", r"caption", r"body"],
-        "url": [r"url", r"link", r"permalink", r"tweetlink"],
-        "timestamp": [r"timestamp", r"date", r"time", r"created", r"tweetdate"],
+        "url": [r"url", r"link", r"permalink", r"tweetlink", r"posturl"],
+        "timestamp": [r"timestamp", r"date", r"time", r"created", r"tweetdate", r"posttimestamp"],
         "author": [r"author", r"page", r"company", r"account", r"brand", r"handle"],
+        "views": [r"view", r"impression", r"viewcount"],
     }
     
     for col_type, pattern_list in patterns.items():
@@ -127,18 +127,11 @@ def detect_columns(df):
         mapping[col_type] = detected
         
         # Fallback to first numeric column for metrics
-        if col_type in ["likes", "comments", "reposts"] and detected is None:
+        if col_type in ["likes", "comments", "reposts", "views"] and detected is None:
             for c in df.columns:
                 if pd.api.types.is_numeric_dtype(df[c]):
                     mapping[col_type] = c
                     break
-    
-    # Final fallback for author
-    if mapping["author"] is None:
-        for c in df.columns:
-            if df[c].nunique() < 50:  # Reasonable number of unique values
-                mapping["author"] = c
-                break
     
     return mapping
 
@@ -150,7 +143,7 @@ st.sidebar.header("Column Mapping (Verify/Correct)")
 cols_main = df_main.columns.tolist()
 
 # Show detected columns and allow manual override
-for col_type in ["likes", "comments", "reposts", "author", "content", "url", "timestamp"]:
+for col_type in ["likes", "comments", "reposts", "views", "author", "content", "url", "timestamp"]:
     current = map_cols.get(col_type)
     idx_default = cols_main.index(current) if current and current in cols_main else 0
     options = [None] + cols_main
@@ -162,24 +155,30 @@ for col_type in ["likes", "comments", "reposts", "author", "content", "url", "ti
         key=f"map_{col_type}"
     )
 
-# Validate required columns
-required = ["likes", "comments", "reposts", "author"]
-missing = [col for col in required if not map_cols[col]]
-
-if missing:
-    st.error(f"Missing required columns: {', '.join(missing)}. Please map them.")
-    st.stop()
+# Add brand name input since author is optional
+MAIN_BRAND = st.sidebar.text_input("Main Brand Name", value="Main Brand")
 
 # ────────────────────────────── Helper: enrich dataframe ─────────────────────────────
 def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # Numeric cleaning
-    for col in (map_cols["likes"], map_cols["comments"], map_cols["reposts"]):
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     
-    # Calculate total interactions
-    interaction_cols = [map_cols[c] for c in ["likes", "comments", "reposts"] if map_cols[c] in df.columns]
+    # Create default columns for missing metrics
+    for col_type in ["likes", "comments", "reposts", "views"]:
+        col_name = map_cols[col_type]
+        if col_name and col_name in df.columns:
+            df[col_name] = pd.to_numeric(df[col_name], errors="coerce").fillna(0).astype(int)
+        else:
+            # Create a column of zeros if not mapped
+            df[col_type] = 0
+            map_cols[col_type] = col_type  # Update mapping to use new column
+    
+    # Calculate total interactions (only from available metrics)
+    interaction_cols = []
+    for col_type in ["likes", "comments", "reposts"]:
+        col_name = map_cols[col_type]
+        if col_name in df.columns:
+            interaction_cols.append(col_name)
+    
     if interaction_cols:
         df["total_interactions"] = df[interaction_cols].sum(axis=1)
     else:
@@ -204,11 +203,10 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
 df_main = enrich(df_main)
 df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
 
-MAIN_BRAND = df_main[map_cols["author"]].mode()[0] if map_cols["author"] in df_main.columns and not df_main.empty else "Main Brand"
-
+# Set brand name
 df_main["brand"] = MAIN_BRAND
-if not df_comp.empty and map_cols["author"] in df_comp.columns:
-    df_comp["brand"] = df_comp[map_cols["author"]]
+if not df_comp.empty:
+    df_comp["brand"] = df_comp[map_cols["author"]] if map_cols["author"] in df_comp.columns else "Competitor"
 
 # ───────────────────────────────────── Tabs ────────────────────────────────────────
 TABS = ["Overview", "Top 10", "Google Insight"]
@@ -224,11 +222,12 @@ with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
     
     # Create metrics columns
-    cols = st.columns(4)
+    cols = st.columns(5)
     metrics = [
         ("Avg Likes", map_cols["likes"]),
         ("Avg Comments", map_cols["comments"]),
         ("Avg Reposts", map_cols["reposts"]),
+        ("Avg Views", map_cols["views"]),
         ("Avg Interactions", "total_interactions")
     ]
     
@@ -240,17 +239,20 @@ with pages[idx["Overview"]]:
             column.metric(name, "N/A")
     
     # Scatter plot
-    if map_cols["likes"] in df_main.columns and map_cols["comments"] in df_main.columns and not df_main.empty:
-        st.markdown("#### Scatter: Comments vs Likes")
-        chart = alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
-            x=alt.X(map_cols["likes"], title="Likes"),
-            y=alt.Y(map_cols["comments"], title="Comments"),
-            color=alt.Color("google_topic:N", legend=alt.Legend(title="Google Mention")),
-            tooltip=[map_cols["content"], map_cols["likes"], map_cols["comments"]]
-        ).interactive()
-        st.altair_chart(chart, use_container_width=True)
+    if not df_main.empty:
+        if map_cols["likes"] in df_main.columns and map_cols["comments"] in df_main.columns:
+            st.markdown("#### Scatter: Comments vs Likes")
+            chart = alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
+                x=alt.X(map_cols["likes"], title="Likes"),
+                y=alt.Y(map_cols["comments"], title="Comments"),
+                color=alt.Color("google_topic:N", legend=alt.Legend(title="Google Mention")),
+                tooltip=[map_cols["content"], map_cols["likes"], map_cols["comments"]]
+            ).interactive()
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.warning("Missing like or comment data for scatter plot")
     else:
-        st.warning("Missing like or comment data for scatter plot")
+        st.warning("No data available for visualization")
 
 # ─────────────────────────────── Compare tab ──────────────────────────────────────
 if "Compare" in TABS and not df_comp.empty and not df_main.empty:
@@ -258,13 +260,21 @@ if "Compare" in TABS and not df_comp.empty and not df_main.empty:
         st.subheader("Compare brands")
         combined = pd.concat([df_main, df_comp], ignore_index=True)
 
-        agg = combined.groupby("brand").agg(
-            posts=("brand", "count"),
-            avg_likes=(map_cols["likes"], "mean"),
-            avg_comments=(map_cols["comments"], "mean"),
-            avg_reposts=(map_cols["reposts"], "mean"),
-            avg_total=("total_interactions", "mean"),
-        ).reset_index().round(1)
+        # Create aggregation based on available columns
+        agg_config = {
+            "posts": ("brand", "count")
+        }
+        
+        # Add metrics that exist in the dataframe
+        for metric in ["likes", "comments", "reposts", "views"]:
+            col_name = map_cols[metric]
+            if col_name in combined.columns:
+                agg_config[f"avg_{metric}"] = (col_name, "mean")
+        
+        if "total_interactions" in combined.columns:
+            agg_config["avg_total"] = ("total_interactions", "mean")
+        
+        agg = combined.groupby("brand").agg(**agg_config).reset_index().round(1)
 
         # Highlight main brand
         def highlight_row(row):
@@ -277,43 +287,51 @@ if "Compare" in TABS and not df_comp.empty and not df_main.empty:
 with pages[idx["Top 10"]]:
     st.subheader(f"Top 10 posts – {MAIN_BRAND}")
     
-    if "total_interactions" in df_main.columns and not df_main.empty:
-        top10 = df_main.sort_values("total_interactions", ascending=False).head(10)
+    if not df_main.empty:
+        # Use views if available, otherwise use interactions
+        sort_col = map_cols["views"] if map_cols["views"] in df_main.columns else "total_interactions"
         
-        # Create post previews
-        if map_cols["content"] in top10.columns:
-            top10["preview"] = top10[map_cols["content"]].str[:80] + "..."
-        
-        # Create download links if URL exists
-        if map_cols["url"] in top10.columns:
-            top10["link"] = top10.apply(
-                lambda x: f'<a href="{x[map_cols["url"]]}" target="_blank">🔗</a>', 
-                axis=1
-            )
-        
-        # Show table
-        show_cols = []
-        if "preview" in top10.columns:
-            show_cols.append("preview")
-        if "link" in top10.columns:
-            show_cols.append("link")
-        show_cols.extend([
-            "date_time", 
-            map_cols["likes"], 
-            map_cols["comments"], 
-            map_cols["reposts"], 
-            "total_interactions"
-        ])
-        
-        st.write(top10[show_cols].to_html(escape=False), unsafe_allow_html=True)
+        if sort_col in df_main.columns:
+            top10 = df_main.sort_values(sort_col, ascending=False).head(10)
+            
+            # Create post previews
+            if map_cols["content"] in top10.columns:
+                top10["preview"] = top10[map_cols["content"]].str[:80] + "..."
+            
+            # Create download links if URL exists
+            if map_cols["url"] in top10.columns:
+                top10["link"] = top10.apply(
+                    lambda x: f'<a href="{x[map_cols["url"]]}" target="_blank">🔗</a>', 
+                    axis=1
+                )
+            
+            # Show table
+            show_cols = []
+            if "preview" in top10.columns:
+                show_cols.append("preview")
+            if "link" in top10.columns:
+                show_cols.append("link")
+            show_cols.extend(["date_time"])
+            
+            # Add available metrics
+            for metric in ["likes", "comments", "reposts", "views"]:
+                if map_cols[metric] in top10.columns:
+                    show_cols.append(map_cols[metric])
+            
+            if "total_interactions" in top10.columns:
+                show_cols.append("total_interactions")
+            
+            st.write(top10[show_cols].to_html(escape=False), unsafe_allow_html=True)
+        else:
+            st.warning("No data available for sorting")
     else:
-        st.warning("No interaction data available")
+        st.warning("No data available")
 
 # ─────────────────────────────── Google Insight ───────────────────────────────────
 with pages[idx["Google Insight"]]:
     st.subheader(f"Google topic insight – {MAIN_BRAND}")
     
-    if "google_topic" in df_main.columns and "total_interactions" in df_main.columns and not df_main.empty:
+    if not df_main.empty and "google_topic" in df_main.columns and "total_interactions" in df_main.columns:
         # Segment data
         high = df_main[df_main["total_interactions"] >= 10]  # High performers
         low = df_main[df_main["total_interactions"] < 10]    # Low performers
@@ -337,11 +355,11 @@ with pages[idx["Google Insight"]]:
         
         if not low_google.empty:
             # Simplified to avoid bracket confusion
-            columns_to_show = [
-                map_cols["content"], 
-                "date_time", 
-                "total_interactions"
-            ]
+            columns_to_show = [map_cols["content"], "date_time", "total_interactions"]
+            # Add views if available
+            if map_cols["views"] in low_google.columns:
+                columns_to_show.append(map_cols["views"])
+                
             st.dataframe(low_google[columns_to_show])
             
             st.download_button(

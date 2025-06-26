@@ -4,15 +4,16 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse LinkedIn‑style CSV exports for a **main brand** and
 optionally a **competitor file**. Tabs: Overview · Compare · Top‑10 · Google
 Insight · Raw.
-Last update: 2025‑06‑27 – fixed CSV reading and bracket syntax error.
+Last update: 2025‑06‑27 – fixed CSV reading for semicolon-delimited files.
 """
 
 import streamlit as st
 import pandas as pd
 import altair as alt
 import re
-from datetime import timedelta
 import io
+import csv
+from datetime import timedelta
 
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
 st.title("📊 Universal Social CSV Analyzer – with Competitor Benchmark")
@@ -25,35 +26,61 @@ if main_file is None:
 
 comp_file = st.sidebar.file_uploader("Upload competitor CSV (optional)", type="csv", key="comp")
 
-# New robust CSV reading function
+# Enhanced CSV reading function
 def robust_read_csv(file):
-    """Read CSV with multiple fallback methods"""
-    # First try standard read
+    """Read CSV with multiple fallback methods, handling different delimiters"""
+    content = file.getvalue().decode('utf-8', errors='ignore')
+    
+    # First try comma delimiter
     try:
-        return pd.read_csv(file)
+        return pd.read_csv(io.StringIO(content))
     except pd.errors.ParserError:
         try:
-            # Try with different engines and error handling
-            return pd.read_csv(file, engine='python', on_bad_lines='warn')
+            # Try semicolon delimiter
+            return pd.read_csv(io.StringIO(content), sep=';')
         except:
             try:
-                # Try with different encoding
-                return pd.read_csv(file, encoding='latin1')
+                # Try with different engines and error handling
+                return pd.read_csv(io.StringIO(content), engine='python', on_bad_lines='warn')
             except:
-                # Final fallback - read as text and clean
-                content = file.getvalue().decode('utf-8', errors='ignore')
-                lines = content.split('\n')
-                cleaned = []
-                for line in lines:
-                    # Simple cleaning of malformed lines
-                    if line.count(',') < 5:  # If too few columns
-                        continue
-                    cleaned.append(line)
-                return pd.read_csv(io.StringIO('\n'.join(cleaned)))
+                try:
+                    # Try with different encoding
+                    return pd.read_csv(io.StringIO(content), encoding='latin1')
+                except:
+                    # Final fallback - manual cleaning
+                    lines = content.split('\n')
+                    cleaned = []
+                    for line in lines:
+                        # Handle semicolon-delimited lines
+                        if ';' in line:
+                            parts = line.split(';')
+                            # Filter out empty parts
+                            parts = [p for p in parts if p.strip() != '']
+                            cleaned.append(parts)
+                        # Handle comma-delimited lines
+                        elif ',' in line:
+                            parts = line.split(',')
+                            parts = [p for p in parts if p.strip() != '']
+                            cleaned.append(parts)
+                    
+                    # Convert to DataFrame if we have data
+                    if len(cleaned) > 1 and len(cleaned[0]) > 1:
+                        header = cleaned[0]
+                        data = cleaned[1:]
+                        return pd.DataFrame(data, columns=header)
+                    else:
+                        return pd.DataFrame()
 
 try:
     df_main = robust_read_csv(main_file)
     df_comp = robust_read_csv(comp_file) if comp_file else pd.DataFrame()
+    
+    # If we have a file with semicolons as separators, clean the column names
+    if ';' in str(df_main.columns):
+        df_main.columns = [col.replace(';', '') for col in df_main.columns]
+    if comp_file and ';' in str(df_comp.columns):
+        df_comp.columns = [col.replace(';', '') for col in df_comp.columns]
+    
 except Exception as e:
     st.error(f"Error reading CSV: {str(e)}")
     st.stop()
@@ -86,13 +113,13 @@ def detect_column(df, patterns):
 def detect_columns(df):
     mapping = {}
     patterns = {
-        "likes": [r"like", r"favou?rite", r"reaction"],
-        "comments": [r"comment", r"reply"],
-        "reposts": [r"repost", r"share", r"retweet"],
+        "likes": [r"like", r"favou?rite", r"reaction", r"likecount"],
+        "comments": [r"comment", r"reply", r"commentcount"],
+        "reposts": [r"repost", r"share", r"retweet", r"repostcount"],
         "content": [r"content", r"text", r"message", r"caption", r"body"],
-        "url": [r"url", r"link", r"permalink"],
-        "timestamp": [r"timestamp", r"date", r"time", r"created"],
-        "author": [r"author", r"page", r"company", r"account", r"brand"],
+        "url": [r"url", r"link", r"permalink", r"tweetlink"],
+        "timestamp": [r"timestamp", r"date", r"time", r"created", r"tweetdate"],
+        "author": [r"author", r"page", r"company", r"account", r"brand", r"handle"],
     }
     
     for col_type, pattern_list in patterns.items():
@@ -125,11 +152,13 @@ cols_main = df_main.columns.tolist()
 # Show detected columns and allow manual override
 for col_type in ["likes", "comments", "reposts", "author", "content", "url", "timestamp"]:
     current = map_cols.get(col_type)
-    idx_default = cols_main.index(current) if current in cols_main else 0
+    idx_default = cols_main.index(current) if current and current in cols_main else 0
+    options = [None] + cols_main
+    index = idx_default + 1 if current and current in cols_main else 0
     map_cols[col_type] = st.sidebar.selectbox(
         f"{col_type.capitalize()} column", 
-        [None] + cols_main,
-        index=idx_default + 1 if current else 0,
+        options,
+        index=index,
         key=f"map_{col_type}"
     )
 
@@ -151,7 +180,10 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     
     # Calculate total interactions
     interaction_cols = [map_cols[c] for c in ["likes", "comments", "reposts"] if map_cols[c] in df.columns]
-    df["total_interactions"] = df[interaction_cols].sum(axis=1)
+    if interaction_cols:
+        df["total_interactions"] = df[interaction_cols].sum(axis=1)
+    else:
+        df["total_interactions"] = 0
 
     # Timestamp handling
     if map_cols["timestamp"] and map_cols["timestamp"] in df.columns:
@@ -172,7 +204,7 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
 df_main = enrich(df_main)
 df_comp = enrich(df_comp) if not df_comp.empty else pd.DataFrame()
 
-MAIN_BRAND = df_main[map_cols["author"]].mode()[0] if map_cols["author"] in df_main.columns else "Main Brand"
+MAIN_BRAND = df_main[map_cols["author"]].mode()[0] if map_cols["author"] in df_main.columns and not df_main.empty else "Main Brand"
 
 df_main["brand"] = MAIN_BRAND
 if not df_comp.empty and map_cols["author"] in df_comp.columns:
@@ -201,12 +233,14 @@ with pages[idx["Overview"]]:
     ]
     
     for (name, col), column in zip(metrics, cols):
-        if col in df_main.columns:
+        if col in df_main.columns and not df_main.empty:
             value = df_main[col].mean()
             column.metric(name, f"{value:.1f}" if not pd.isna(value) else "N/A")
+        else:
+            column.metric(name, "N/A")
     
     # Scatter plot
-    if map_cols["likes"] in df_main.columns and map_cols["comments"] in df_main.columns:
+    if map_cols["likes"] in df_main.columns and map_cols["comments"] in df_main.columns and not df_main.empty:
         st.markdown("#### Scatter: Comments vs Likes")
         chart = alt.Chart(df_main).mark_circle(size=60, opacity=0.6).encode(
             x=alt.X(map_cols["likes"], title="Likes"),
@@ -219,7 +253,7 @@ with pages[idx["Overview"]]:
         st.warning("Missing like or comment data for scatter plot")
 
 # ─────────────────────────────── Compare tab ──────────────────────────────────────
-if "Compare" in TABS and not df_comp.empty:
+if "Compare" in TABS and not df_comp.empty and not df_main.empty:
     with pages[idx["Compare"]]:
         st.subheader("Compare brands")
         combined = pd.concat([df_main, df_comp], ignore_index=True)
@@ -243,7 +277,7 @@ if "Compare" in TABS and not df_comp.empty:
 with pages[idx["Top 10"]]:
     st.subheader(f"Top 10 posts – {MAIN_BRAND}")
     
-    if "total_interactions" in df_main.columns:
+    if "total_interactions" in df_main.columns and not df_main.empty:
         top10 = df_main.sort_values("total_interactions", ascending=False).head(10)
         
         # Create post previews
@@ -279,7 +313,7 @@ with pages[idx["Top 10"]]:
 with pages[idx["Google Insight"]]:
     st.subheader(f"Google topic insight – {MAIN_BRAND}")
     
-    if "google_topic" in df_main.columns and "total_interactions" in df_main.columns:
+    if "google_topic" in df_main.columns and "total_interactions" in df_main.columns and not df_main.empty:
         # Segment data
         high = df_main[df_main["total_interactions"] >= 10]  # High performers
         low = df_main[df_main["total_interactions"] < 10]    # Low performers

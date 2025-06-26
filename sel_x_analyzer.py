@@ -275,6 +275,7 @@ with pages[idx["Google Insight"]]:
         low_google = segments["Low <10 • Google"]
         
         if not low_google.empty:
+            # FIXED HERE: Added missing closing bracket
             st.dataframe(low_google[[
                 map_cols["content"], 
                 "date_time", 
@@ -294,7 +295,10 @@ with pages[idx["Google Insight"]]:
         st.markdown("#### Performance Summary")
         summary_data = []
         for name, segment in segments.items():
-            avg = segment["total_interactions"].mean() if not segment.empty else 0
+            if segment.empty:
+                avg = 0
+            else:
+                avg = segment["total_interactions"].mean()
             summary_data.append({
                 "Segment": name,
                 "Posts": len(segment),

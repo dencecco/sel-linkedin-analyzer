@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse social media CSV exports for a **main brand** and
 optionally a **competitor file**. Supports LinkedIn, Twitter/X, Instagram, etc.
 Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
-Last update: 2025‑06‑27 – added post frequency metric.
+Last update: 2025‑06‑27 – fixed top 10 sorting.
 """
 
 import streamlit as st
@@ -385,22 +385,17 @@ if "Compare" in TABS and not df_comp.empty and not df_main.empty:
 
 # ─────────────────────────────── Top‑10 tab ──────────────────────────────────────
 with pages[idx["Top 10"]]:
-    st.subheader(f"Top 10 posts – {MAIN_BRAND}")
+    st.subheader(f"Top 10 Posts – {MAIN_BRAND}")
     
     if not df_main.empty:
-        # Use views if available, otherwise use interactions
-        if map_cols["views"] in df_main.columns:
-            sort_col = map_cols["views"]
-            sort_name = "Views"
-        elif "total_interactions" in df_main.columns:
-            sort_col = "total_interactions"
-            sort_name = "Interactions"
-        else:
-            sort_col = None
+        # FIXED: Always sort by total interactions for top performers
+        if "total_interactions" in df_main.columns:
+            # Create a sorted copy to avoid modifying original
+            sorted_df = df_main.sort_values("total_interactions", ascending=False).copy()
             
-        if sort_col:
-            top10 = df_main.sort_values(sort_col, ascending=False).head(10)
-            st.caption(f"Sorted by {sort_name}")
+            # Get top 10 based on total interactions
+            top10 = sorted_df.head(10)
+            st.caption("Sorted by Total Interactions")
             
             # Create post previews
             if map_cols["content"] in top10.columns:
@@ -429,6 +424,7 @@ with pages[idx["Top 10"]]:
             if "total_interactions" in top10.columns:
                 show_cols.append("total_interactions")
             
+            # Display with interaction counts
             st.write(top10[show_cols].to_html(escape=False), unsafe_allow_html=True)
             
             # Prepare download version with embedded URL
@@ -474,7 +470,7 @@ with pages[idx["Top 10"]]:
                     key="dl_top10"
                 )
         else:
-            st.warning("No data available for sorting")
+            st.warning("No interaction data available for sorting")
     else:
         st.warning("No data available")
 
@@ -551,4 +547,3 @@ with pages[idx["Raw"]]:
         "processed_data.csv", 
         key="dl_processed"
     )
-    

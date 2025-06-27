@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse social media CSV exports for a **main brand** and
 optionally a **competitor file**. Supports LinkedIn, Twitter/X, Instagram, etc.
 Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
-Last update: 2025‑06‑27 – added post count and date range to overview.
+Last update: 2025‑06‑27 – added post frequency metric.
 """
 
 import streamlit as st
@@ -12,7 +12,7 @@ import pandas as pd
 import altair as alt
 import re
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Initialize Streamlit
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
@@ -257,8 +257,8 @@ idx = {name: i for i, name in enumerate(TABS)}
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
     
-    # Create metrics columns - 6 columns to fit new metrics
-    cols = st.columns(6)
+    # Create metrics columns - 7 columns to fit all metrics
+    cols = st.columns(7)
     
     # Calculate total posts
     total_posts = len(df_main) if not df_main.empty else 0
@@ -266,6 +266,8 @@ with pages[idx["Overview"]]:
     
     # Calculate date range if available
     date_range = "N/A"
+    min_date = None
+    max_date = None
     if not df_main.empty and "date" in df_main.columns and not df_main["date"].isnull().all():
         valid_dates = df_main[df_main["date"].notnull()]["date"]
         if not valid_dates.empty:
@@ -273,6 +275,18 @@ with pages[idx["Overview"]]:
             max_date = valid_dates.max()
             date_range = f"{min_date.strftime('%d-%m')} to {max_date.strftime('%d-%m %Y')}"
     cols[1].metric("Date Range", date_range)
+    
+    # Calculate posts per week
+    posts_per_week = "N/A"
+    if min_date and max_date and total_posts > 0:
+        try:
+            days = (max_date - min_date).days
+            weeks = max(days / 7.0, 1)  # At least 1 week to avoid division by zero
+            posts_per_week = total_posts / weeks
+            posts_per_week = f"{posts_per_week:.1f}"
+        except:
+            posts_per_week = "N/A"
+    cols[2].metric("Avg Posts/Week", posts_per_week)
     
     # Engagement metrics
     metrics = [
@@ -283,8 +297,8 @@ with pages[idx["Overview"]]:
         ("Avg Interactions", "total_interactions")
     ]
     
-    # Position remaining metrics starting from column 2
-    for i, ((name, col), column) in enumerate(zip(metrics, cols[2:])):
+    # Position remaining metrics starting from column 3
+    for i, ((name, col), column) in enumerate(zip(metrics, cols[3:])):
         if col in df_main.columns and not df_main.empty:
             value = df_main[col].mean()
             column.metric(name, f"{value:.1f}" if not pd.isna(value) else "N/A")
@@ -294,7 +308,8 @@ with pages[idx["Overview"]]:
     # Store metrics for download
     metrics_data = [
         {"Metric": "Total Posts", "Value": total_posts},
-        {"Metric": "Date Range", "Value": date_range}
+        {"Metric": "Date Range", "Value": date_range},
+        {"Metric": "Avg Posts/Week", "Value": posts_per_week}
     ]
     
     for name, col in metrics:
@@ -536,3 +551,4 @@ with pages[idx["Raw"]]:
         "processed_data.csv", 
         key="dl_processed"
     )
+    

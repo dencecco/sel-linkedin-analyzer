@@ -4,7 +4,7 @@ LinkedIn / Multi‑Social CSV Analyzer
 Streamlit app to analyse social media CSV exports for a **main brand** and
 optionally a **competitor file**. Supports LinkedIn, Twitter/X, Instagram, etc.
 Tabs: Overview · Compare · Top‑10 · Google Insight · Raw.
-Last update: 2025‑06‑27 – added download buttons for overview and top posts.
+Last update: 2025‑06‑27 – added post count and date range to overview.
 """
 
 import streamlit as st
@@ -12,7 +12,7 @@ import pandas as pd
 import altair as alt
 import re
 import io
-from datetime import timedelta
+from datetime import datetime
 
 # Initialize Streamlit
 st.set_page_config(page_title="Universal Social Analyzer", layout="wide")
@@ -221,8 +221,12 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
         ts = map_cols["timestamp"]
         df[ts] = pd.to_datetime(df[ts], errors="coerce")
         df["date_time"] = df[ts].dt.strftime("%Y-%m-%d %H:%M")
+        
+        # Create a date-only column for date range calculation
+        df["date"] = df[ts].dt.date
     else:
         df["date_time"] = "NA"
+        df["date"] = None
 
     # Topic detection
     if map_cols["content"] and map_cols["content"] in df.columns:
@@ -253,8 +257,24 @@ idx = {name: i for i, name in enumerate(TABS)}
 with pages[idx["Overview"]]:
     st.subheader(f"Overview – {MAIN_BRAND}")
     
-    # Create metrics columns
-    cols = st.columns(5)
+    # Create metrics columns - 6 columns to fit new metrics
+    cols = st.columns(6)
+    
+    # Calculate total posts
+    total_posts = len(df_main) if not df_main.empty else 0
+    cols[0].metric("Total Posts", total_posts)
+    
+    # Calculate date range if available
+    date_range = "N/A"
+    if not df_main.empty and "date" in df_main.columns and not df_main["date"].isnull().all():
+        valid_dates = df_main[df_main["date"].notnull()]["date"]
+        if not valid_dates.empty:
+            min_date = valid_dates.min()
+            max_date = valid_dates.max()
+            date_range = f"{min_date.strftime('%d-%m')} to {max_date.strftime('%d-%m %Y')}"
+    cols[1].metric("Date Range", date_range)
+    
+    # Engagement metrics
     metrics = [
         ("Avg Likes", map_cols["likes"]),
         ("Avg Comments", map_cols["comments"]),
@@ -263,16 +283,25 @@ with pages[idx["Overview"]]:
         ("Avg Interactions", "total_interactions")
     ]
     
-    # Store metrics for download
-    metrics_data = []
-    
-    for (name, col), column in zip(metrics, cols):
+    # Position remaining metrics starting from column 2
+    for i, ((name, col), column) in enumerate(zip(metrics, cols[2:])):
         if col in df_main.columns and not df_main.empty:
             value = df_main[col].mean()
             column.metric(name, f"{value:.1f}" if not pd.isna(value) else "N/A")
-            metrics_data.append({"Metric": name, "Value": value})
         else:
             column.metric(name, "N/A")
+    
+    # Store metrics for download
+    metrics_data = [
+        {"Metric": "Total Posts", "Value": total_posts},
+        {"Metric": "Date Range", "Value": date_range}
+    ]
+    
+    for name, col in metrics:
+        if col in df_main.columns and not df_main.empty:
+            value = df_main[col].mean()
+            metrics_data.append({"Metric": name, "Value": value})
+        else:
             metrics_data.append({"Metric": name, "Value": "N/A"})
     
     # Create metrics DataFrame for download
